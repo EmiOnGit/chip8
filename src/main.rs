@@ -11,8 +11,9 @@ fn main() -> Result<(), Error> {
     env_logger::init();
     let display = AppDisplay::init()?;
     let display_bus = display.display_bus();
+    let pixel_buffer = display.pixel_buffer();
     std::thread::spawn(move || {
-        let chip8 = Chip8::new(display_bus);
+        let chip8 = Chip8::new(display_bus, pixel_buffer);
         chip8.run();
     });
     display.run()

@@ -2,5 +2,10 @@
 pub enum DisplayEvent {
     #[default]
     Nop,
-    SwapPixel(usize, usize),
+    ClearScreen,
+    DrawSprite {
+        sprite: [u8; 16],
+        x: u8,
+        y: u8,
+    },
 }

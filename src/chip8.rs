@@ -1,28 +1,39 @@
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Arc, RwLock},
+    time::{Duration, Instant},
+};
 
+use pixels::Pixels;
 use winit::event_loop::EventLoopProxy;
 
 use crate::display_bus::DisplayEvent;
+
+use self::hardware::Hardware;
+pub mod hardware;
+pub mod screen;
+
 pub struct Chip8 {
     display_bus: EventLoopProxy<DisplayEvent>,
+    pixels: Arc<RwLock<Pixels>>,
     device_timer: DeviceTimer,
+    hardware: Hardware,
 }
 impl Chip8 {
-    pub fn new(display_bus: EventLoopProxy<DisplayEvent>) -> Chip8 {
+    pub fn new(display_bus: EventLoopProxy<DisplayEvent>, pixels: Arc<RwLock<Pixels>>) -> Chip8 {
+        let mut hardware = Hardware::default();
+        hardware.load_program(include_bytes!("../IBM Logo.ch8"));
         Chip8 {
             display_bus,
             device_timer: DeviceTimer::default(),
+            pixels,
+            hardware,
         }
     }
     pub fn run(mut self) {
-        let mut x = 0;
         loop {
-            if self.device_timer.counter == 0 {
-                x += 1;
-                self.display_bus
-                    .send_event(DisplayEvent::SwapPixel(x, 1))
-                    .unwrap();
-            }
+            let instr = self.hardware.fetch();
+            self.hardware
+                .decode(instr, &mut self.display_bus, &self.pixels);
 
             self.device_timer.next();
         }
@@ -57,7 +68,4 @@ impl Default for DeviceTimer {
             counter: 0,
         }
     }
-}
-enum Op {
-    None,
 }
