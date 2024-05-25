@@ -1,6 +1,8 @@
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, RwLock};
 
 use crate::chip8::screen::{self};
+use crate::chip8::Events;
 use crate::display_bus::DisplayEvent;
 use crate::io::InputState;
 use crate::ui::Framework;
@@ -26,7 +28,7 @@ impl AppDisplay {
     pub fn display_bus(&self) -> EventLoopProxy<DisplayEvent> {
         self.event_loop.create_proxy()
     }
-    pub fn init() -> Result<AppDisplay, Error> {
+    pub fn init() -> Result<(AppDisplay, Receiver<Events>), Error> {
         let input = WinitInputHelper::new();
         let event_loop = EventLoopBuilder::<DisplayEvent>::default().build();
 
@@ -39,6 +41,7 @@ impl AppDisplay {
                 .build(&event_loop)
                 .unwrap()
         };
+        let (sender, receiver) = mpsc::channel();
         let (pixels, framework) = {
             let window_size = window.inner_size();
             let scale_factor = window.scale_factor() as f32;
@@ -55,18 +58,22 @@ impl AppDisplay {
                 window_size.height,
                 scale_factor,
                 &pixels,
+                sender,
             );
             let pixels = Arc::new(RwLock::new(pixels));
 
             (pixels, framework)
         };
-        Ok(AppDisplay {
-            input,
-            event_loop,
-            framework,
-            pixels,
-            window,
-        })
+        Ok((
+            AppDisplay {
+                input,
+                event_loop,
+                framework,
+                pixels,
+                window,
+            },
+            receiver,
+        ))
     }
     pub fn run(self) -> Result<(), Error> {
         let AppDisplay {
@@ -150,7 +157,7 @@ impl AppDisplay {
                         let Ok(mut pixels) = pixels.write() else {
                             return;
                         };
-                        let color = [255, 111, 21, 199];
+                        let color = framework.gui.color.to_array();
                         for y_delta in 0..16 {
                             screen::set_row(
                                 &mut pixels,

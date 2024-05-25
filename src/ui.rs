@@ -1,8 +1,12 @@
-use egui::{ClippedPrimitive, Context, TexturesDelta};
+use std::sync::mpsc::Sender;
+
+use egui::{ClippedPrimitive, Color32, Context, TexturesDelta};
 use egui_wgpu::renderer::{Renderer, ScreenDescriptor};
 use pixels::{wgpu, PixelsContext};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::window::Window;
+
+use crate::chip8::Events;
 
 /// Manages all state required for rendering egui over `Pixels`.
 pub(crate) struct Framework {
@@ -15,13 +19,15 @@ pub(crate) struct Framework {
     textures: TexturesDelta,
 
     // State for the GUI
-    gui: Gui,
+    pub gui: Gui,
 }
 
 /// Example application state. A real application will need a lot more state than this.
-struct Gui {
+pub struct Gui {
+    pub color: Color32,
     /// Only show the egui window when true.
     window_open: bool,
+    event_bus: Sender<Events>,
 }
 
 impl Framework {
@@ -32,6 +38,7 @@ impl Framework {
         height: u32,
         scale_factor: f32,
         pixels: &pixels::Pixels,
+        event_bus: Sender<Events>,
     ) -> Self {
         let max_texture_size = pixels.device().limits().max_texture_dimension_2d as usize;
 
@@ -45,7 +52,7 @@ impl Framework {
         };
         let renderer = Renderer::new(pixels.device(), pixels.render_texture_format(), None, 1);
         let textures = TexturesDelta::default();
-        let gui = Gui::new();
+        let gui = Gui::new(event_bus);
 
         Self {
             egui_ctx,
@@ -139,8 +146,12 @@ impl Framework {
 
 impl Gui {
     /// Create a `Gui`.
-    fn new() -> Self {
-        Self { window_open: true }
+    fn new(event_bus: Sender<Events>) -> Self {
+        Self {
+            window_open: true,
+            color: Color32::GREEN,
+            event_bus,
+        }
     }
 
     /// Create the UI using egui.
@@ -161,6 +172,7 @@ impl Gui {
             .show(ctx, |ui| {
                 ui.label("This example demonstrates using egui with pixels.");
                 ui.label("Made with 💖 in San Francisco!");
+                ui.color_edit_button_srgba(&mut self.color);
 
                 ui.separator();
 

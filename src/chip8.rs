@@ -1,5 +1,8 @@
 use std::{
-    sync::{Arc, RwLock},
+    sync::{
+        mpsc::{self, Receiver},
+        Arc, RwLock,
+    },
     time::{Duration, Instant},
 };
 
@@ -17,12 +20,20 @@ pub struct Chip8 {
     pixels: Arc<RwLock<Pixels>>,
     device_timer: DeviceTimer,
     hardware: Hardware,
+    event_bus: Receiver<Events>,
 }
+pub enum Events {}
 impl Chip8 {
-    pub fn new(display_bus: EventLoopProxy<DisplayEvent>, pixels: Arc<RwLock<Pixels>>) -> Chip8 {
+    pub fn new(
+        display_bus: EventLoopProxy<DisplayEvent>,
+        pixels: Arc<RwLock<Pixels>>,
+        event_bus: Receiver<Events>,
+    ) -> Chip8 {
+        let (r, w) = mpsc::channel::<Events>();
         let mut hardware = Hardware::default();
         hardware.load_program(include_bytes!("../IBM Logo.ch8"));
         Chip8 {
+            event_bus,
             display_bus,
             device_timer: DeviceTimer::default(),
             pixels,
