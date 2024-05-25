@@ -1,12 +1,13 @@
-use std::sync::mpsc::Sender;
-
 use egui::{ClippedPrimitive, Color32, Context, TexturesDelta};
 use egui_wgpu::renderer::{Renderer, ScreenDescriptor};
 use pixels::{wgpu, PixelsContext};
-use winit::event_loop::EventLoopWindowTarget;
+use winit::event_loop::{EventLoop, EventLoopProxy};
 use winit::window::Window;
 
-use crate::chip8::Events;
+use crate::chip8::EmulatorEvents;
+use crate::display_bus::AppEvents;
+
+use super::emulator_view::EmulatorView;
 
 /// Manages all state required for rendering egui over `Pixels`.
 pub(crate) struct Framework {
@@ -27,22 +28,30 @@ pub struct Gui {
     pub color: Color32,
     /// Only show the egui window when true.
     window_open: bool,
-    event_bus: Sender<Events>,
+    pub event_bus: EventLoopProxy<AppEvents>,
 }
 
 impl Framework {
     /// Create egui.
-    pub(crate) fn new<T>(
-        event_loop: &EventLoopWindowTarget<T>,
+    pub(crate) fn new(
+        event_loop: &EventLoop<AppEvents>,
         width: u32,
         height: u32,
         scale_factor: f32,
-        pixels: &pixels::Pixels,
-        event_bus: Sender<Events>,
+        emulator_view: &EmulatorView,
     ) -> Self {
-        let max_texture_size = pixels.device().limits().max_texture_dimension_2d as usize;
+        let (max_texture_size, renderer) = emulator_view
+            .on_pixels(|pixels| {
+                let max_texture_size = pixels.device().limits().max_texture_dimension_2d as usize;
+                let renderer =
+                    Renderer::new(pixels.device(), pixels.render_texture_format(), None, 1);
+
+                (max_texture_size, renderer)
+            })
+            .unwrap();
 
         let egui_ctx = Context::default();
+        let event_bus = event_loop.create_proxy();
         let mut egui_state = egui_winit::State::new(event_loop);
         egui_state.set_max_texture_side(max_texture_size);
         egui_state.set_pixels_per_point(scale_factor);
@@ -50,7 +59,6 @@ impl Framework {
             size_in_pixels: [width, height],
             pixels_per_point: scale_factor,
         };
-        let renderer = Renderer::new(pixels.device(), pixels.render_texture_format(), None, 1);
         let textures = TexturesDelta::default();
         let gui = Gui::new(event_bus);
 
@@ -87,7 +95,7 @@ impl Framework {
         // Run the egui frame and create all paint jobs to prepare for rendering.
         let raw_input = self.egui_state.take_egui_input(window);
         let output = self.egui_ctx.run(raw_input, |egui_ctx| {
-            // Draw the demo application.
+            // Draw the application.
             self.gui.ui(egui_ctx);
         });
 
@@ -146,7 +154,7 @@ impl Framework {
 
 impl Gui {
     /// Create a `Gui`.
-    fn new(event_bus: Sender<Events>) -> Self {
+    fn new(event_bus: EventLoopProxy<AppEvents>) -> Self {
         Self {
             window_open: true,
             color: Color32::GREEN,
@@ -166,13 +174,28 @@ impl Gui {
                 })
             });
         });
-
         egui::Window::new("Hello, egui!")
             .open(&mut self.window_open)
             .show(ctx, |ui| {
+                if ui.button("Create Emulator Client").clicked() {
+                    self.event_bus
+                        .send_event(AppEvents::SpawnEmulator { client: true })
+                        .expect("couldn't send `SpawnEmulator` event to main app");
+                }
+                if ui.button("Create Emulator Server").clicked() {
+                    self.event_bus
+                        .send_event(AppEvents::SpawnEmulator { client: false })
+                        .expect("couldn't send `SpawnEmulator` event to main app");
+                }
                 ui.label("This example demonstrates using egui with pixels.");
                 ui.label("Made with 💖 in San Francisco!");
-                ui.color_edit_button_srgba(&mut self.color);
+                if ui.color_edit_button_srgba(&mut self.color).changed() {
+                    self.event_bus
+                        .send_event(AppEvents::EmulatorEvent(EmulatorEvents::ChangeColor(
+                            self.color,
+                        )))
+                        .unwrap();
+                }
 
                 ui.separator();
 

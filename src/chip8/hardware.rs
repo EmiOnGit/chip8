@@ -5,7 +5,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     chip8::screen::{SCREEN_HEIGHT, SCREEN_WIDTH},
-    display_bus::DisplayEvent,
+    display_bus::AppEvents,
 };
 
 const FONT: [u8; 80] = [
@@ -68,11 +68,11 @@ impl Hardware {
     pub fn decode(
         &mut self,
         instr: u16,
-        bus: &mut EventLoopProxy<DisplayEvent>,
+        bus: &mut EventLoopProxy<AppEvents>,
         pixel_buffer: &Arc<RwLock<Pixels>>,
     ) {
         let b0 = (instr & 0xFF00) >> 8 as u8; // To get first byte, & the 8 leftmost bits which removes the 8 rightmost, then shift by 8 to the right to make the u8 conversion contain the bits originally on the left.
-        println!("instr: {instr:x}, pc: {pc:x}", pc = self.pc);
+                                              // println!("instr: {instr:x}, pc: {pc:x}", pc = self.pc);
         let b1 = (instr & 0x00FF) as u8; // To get the second byte, just & the 8 rightmost bits, which removes the leftmost bits. The remaining bits are already at the rightmost position so no need to shift before converting to u8.
 
         let op = (b0 & 0xF0) >> 4 as u8; // first nibble, the instruction. Keep 4 leftmost bits, then shift them to the right-hand side.
@@ -83,7 +83,7 @@ impl Hardware {
         let nnn = (instr & 0x0FFF) as u16; // NNN = second, third and fourth nibbles, obtained by ANDing by b00001111 11111111 masking away the first nibble.
         match (op, x, y, n) {
             // Clear screen
-            (0x0, 0x0, 0xe, 0x0) => bus.send_event(DisplayEvent::ClearScreen).unwrap(),
+            (0x0, 0x0, 0xe, 0x0) => bus.send_event(AppEvents::ClearScreen).unwrap(),
             // Return from subroutine
             (0x0, 0x0, 0xe, 0xe) => {
                 self.pc = self.stack[self.stack_frame as usize];
@@ -141,7 +141,7 @@ impl Hardware {
                         }
                     }
                 }
-                bus.send_event(DisplayEvent::DrawSprite { sprite, x, y })
+                bus.send_event(AppEvents::DrawSprite { sprite, x, y })
                     .unwrap();
             }
             _ => {
