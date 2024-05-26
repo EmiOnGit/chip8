@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::chip8::EmulatorEvents;
+use crate::{app::EmulatorKind, chip8::EmulatorEvents};
 
 #[derive(Default, Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum AppEvents {
@@ -14,6 +14,6 @@ pub enum AppEvents {
         y: u8,
     },
     SpawnEmulator {
-        client: bool,
+        kind: EmulatorKind,
     },
 }

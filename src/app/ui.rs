@@ -186,12 +186,26 @@ impl Gui {
             .show(ctx, |ui| {
                 if ui.button("Create Emulator Client").clicked() {
                     self.event_bus
-                        .send_event(AppEvents::SpawnEmulator { client: true })
+                        .send_event(AppEvents::SpawnEmulator {
+                            kind: super::EmulatorKind::Client,
+                        })
                         .expect("couldn't send `SpawnEmulator` event to main app");
                 }
                 if ui.button("Create Emulator Server").clicked() {
                     self.event_bus
-                        .send_event(AppEvents::SpawnEmulator { client: false })
+                        .send_event(AppEvents::SpawnEmulator {
+                            kind: super::EmulatorKind::Server,
+                        })
+                        .expect("couldn't send `SpawnEmulator` event to main app");
+                    if self.debugger.is_none() {
+                        self.debugger = Some(Debugger { pc: 10 });
+                    }
+                }
+                if ui.button("Create Emulator Single").clicked() {
+                    self.event_bus
+                        .send_event(AppEvents::SpawnEmulator {
+                            kind: super::EmulatorKind::Single,
+                        })
                         .expect("couldn't send `SpawnEmulator` event to main app");
                     if self.debugger.is_none() {
                         self.debugger = Some(Debugger { pc: 10 });

@@ -1,4 +1,5 @@
 use std::{
+    io::Write,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
     sync::{
         mpsc::{self, Receiver, Sender},
@@ -11,14 +12,19 @@ use std::{
 use pixels::{Pixels, SurfaceTexture};
 use winit::window::Window;
 
-use crate::chip8::{screen, EmulatorEvents};
+use crate::{
+    chip8::{screen, EmulatorEvents},
+    display_bus::AppEvents,
+};
 
 pub enum EmulatorViewMode {
     Host(HostView),
     Client(ClientView),
+    Single(SingleView),
     OffView(OffView),
 }
 const ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 4214));
+
 pub type PixelRef = Arc<RwLock<Pixels>>;
 pub struct EmulatorView {
     pixels: PixelRef,
@@ -30,6 +36,7 @@ impl EmulatorView {
             EmulatorViewMode::Host(host) => host.sender.send(event).unwrap(),
             EmulatorViewMode::Client(_) => {}
             EmulatorViewMode::OffView(_) => {}
+            EmulatorViewMode::Single(_) => {}
         }
     }
     pub fn new(window: &Window) -> Result<Self, pixels::Error> {
@@ -56,6 +63,19 @@ impl EmulatorView {
                 thread::sleep(Duration::from_secs_f32(0.05));
                 connection
             }
+            EmulatorViewMode::Single(_) => panic!(),
+        }
+    }
+    pub fn to_single(&mut self) -> Option<Receiver<EmulatorEvents>> {
+        match self.mode {
+            EmulatorViewMode::Host(_) => panic!(),
+            EmulatorViewMode::Client(_) => panic!("already client"),
+            EmulatorViewMode::OffView(_) => {
+                let (sender, recv) = mpsc::channel();
+                self.mode = EmulatorViewMode::Single(SingleView { sender });
+                return Some(recv);
+            }
+            EmulatorViewMode::Single(_) => panic!(),
         }
     }
     pub fn to_host(&mut self) -> Option<Receiver<EmulatorEvents>> {
@@ -90,6 +110,7 @@ impl EmulatorView {
                 });
                 return Some(recv);
             }
+            EmulatorViewMode::Single(_) => panic!(),
         };
         return None;
     }
@@ -107,8 +128,26 @@ impl EmulatorView {
 }
 
 pub struct OffView {}
+pub struct SingleView {
+    sender: Sender<EmulatorEvents>,
+}
 pub struct HostView {
     sender: Sender<EmulatorEvents>,
     pub tcp: Option<TcpStream>,
+}
+impl HostView {
+    pub fn send_over_tcp(&mut self, event: &AppEvents) {
+        let Some(tcp) = &mut self.tcp else { return };
+        let bytes = bincode::serialize(event);
+        let Ok(mut bytes) = bytes else { return };
+        let mut buffer = bytes.len().to_be_bytes().to_vec();
+        buffer.append(&mut bytes);
+
+        tcp.write_all(&buffer).unwrap();
+        // println!("send mess");
+        // let mess = String::from("Hallo from server\n");
+        // tcp.write(&mess.into_bytes()).unwrap();
+        tcp.flush().unwrap();
+    }
 }
 pub struct ClientView;

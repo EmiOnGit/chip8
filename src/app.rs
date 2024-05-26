@@ -1,7 +1,7 @@
 pub mod emulator_view;
 mod ui;
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -12,6 +12,7 @@ use crate::display_bus::AppEvents;
 use crate::io::InputState;
 use log::error;
 use pixels::Error;
+use serde::{Deserialize, Serialize};
 use winit::dpi::LogicalSize;
 use winit::event::{Event, VirtualKeyCode};
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
@@ -140,23 +141,11 @@ impl App {
                         }
                     });
                 }
-                Event::UserEvent(display_event) => {
+                Event::UserEvent(app_event) => {
                     if let EmulatorViewMode::Host(host_view) = &mut emulator_view.mode {
-                        if let Some(tcp) = &mut host_view.tcp {
-                            let bytes = bincode::serialize(&display_event);
-                            if let Ok(mut bytes) = bytes {
-                                let mut buffer = bytes.len().to_be_bytes().to_vec();
-                                buffer.append(&mut bytes);
-
-                                tcp.write_all(&buffer).unwrap();
-                            }
-                            // println!("send mess");
-                            // let mess = String::from("Hallo from server\n");
-                            // tcp.write(&mess.into_bytes()).unwrap();
-                            tcp.flush().unwrap();
-                        }
+                        host_view.send_over_tcp(&app_event);
                     }
-                    match display_event {
+                    match app_event {
                         AppEvents::Nop => println!("nop"),
                         AppEvents::ClearScreen => {
                             emulator_view.on_pixels_mut(|pixels| {
@@ -178,7 +167,7 @@ impl App {
                                 }
                             });
                         }
-                        AppEvents::SpawnEmulator { client } => {
+                        AppEvents::SpawnEmulator { kind } => {
                             let config = EmulatorConfig::new(framework.gui.color);
                             let event_bus = framework.gui.event_bus.clone();
                             spawn_emulator(
@@ -186,7 +175,7 @@ impl App {
                                 config,
                                 Arc::clone(&input_state),
                                 event_bus,
-                                client,
+                                kind,
                             );
                         }
                         AppEvents::EmulatorEvent(event) => {
@@ -199,39 +188,59 @@ impl App {
         });
     }
 }
+#[derive(Deserialize, Serialize, PartialEq, Debug, Eq, Clone, Copy)]
+pub enum EmulatorKind {
+    Single,
+    Server,
+    Client,
+}
 fn spawn_emulator(
     emulator_view: &mut EmulatorView,
     config: EmulatorConfig,
     input_state: InputStateRef,
     event_bus: EventLoopProxy<AppEvents>,
-    is_client: bool,
+    kind: EmulatorKind,
 ) {
-    if is_client {
-        let mut tcp = emulator_view.to_client();
-        thread::spawn(move || loop {
-            let mut length_bytes = 0usize.to_be_bytes();
-            if let Err(e) = tcp.read_exact(&mut length_bytes) {
-                println!("failed reading with: {e}");
+    match kind {
+        EmulatorKind::Single => {
+            let recv = emulator_view.to_single();
+            let Some(recv) = recv else {
                 return;
             };
-            let length = usize::from_be_bytes(length_bytes);
-            let mut message = vec![0; length];
-            if let Err(e) = tcp.read_exact(&mut message) {
-                println!("failed reading with: {e}");
+            let pixel_buffer = emulator_view.clone_pixel_buffer();
+            thread::spawn(move || {
+                let chip8 = Chip8::new(event_bus, pixel_buffer, input_state, recv, config);
+                chip8.run();
+            });
+        }
+        EmulatorKind::Server => {
+            let recv = emulator_view.to_host();
+            let Some(recv) = recv else {
                 return;
             };
-            let message: AppEvents = bincode::deserialize(&message).unwrap();
-            event_bus.send_event(message).unwrap();
-        });
-    } else {
-        let recv = emulator_view.to_host();
-        let Some(recv) = recv else {
-            return;
-        };
-        let pixel_buffer = emulator_view.clone_pixel_buffer();
-        thread::spawn(move || {
-            let chip8 = Chip8::new(event_bus, pixel_buffer, input_state, recv, config);
-            chip8.run();
-        });
+            let pixel_buffer = emulator_view.clone_pixel_buffer();
+            thread::spawn(move || {
+                let chip8 = Chip8::new(event_bus, pixel_buffer, input_state, recv, config);
+                chip8.run();
+            });
+        }
+        EmulatorKind::Client => {
+            let mut tcp = emulator_view.to_client();
+            thread::spawn(move || loop {
+                let mut length_bytes = 0usize.to_be_bytes();
+                if let Err(e) = tcp.read_exact(&mut length_bytes) {
+                    println!("failed reading with: {e}");
+                    return;
+                };
+                let length = usize::from_be_bytes(length_bytes);
+                let mut message = vec![0; length];
+                if let Err(e) = tcp.read_exact(&mut message) {
+                    println!("failed reading with: {e}");
+                    return;
+                };
+                let message: AppEvents = bincode::deserialize(&message).unwrap();
+                event_bus.send_event(message).unwrap();
+            });
+        }
     }
 }
