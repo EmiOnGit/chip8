@@ -36,7 +36,7 @@ impl EmulatorView {
             EmulatorViewMode::Host(host) => host.sender.send(event).unwrap(),
             EmulatorViewMode::Client(_) => {}
             EmulatorViewMode::OffView(_) => {}
-            EmulatorViewMode::Single(_) => {}
+            EmulatorViewMode::Single(single) => single.sender.send(event).unwrap(),
         }
     }
     pub fn new(window: &Window) -> Result<Self, pixels::Error> {
@@ -52,67 +52,52 @@ impl EmulatorView {
             mode: EmulatorViewMode::OffView(OffView {}),
         })
     }
-    pub fn to_client(&mut self) -> TcpStream {
-        match self.mode {
-            EmulatorViewMode::Host(_) => panic!(),
-            EmulatorViewMode::Client(_) => panic!("already client"),
-            EmulatorViewMode::OffView(_) => {
-                let connection = TcpStream::connect(ADDR).unwrap();
-                println!("CLIENT connected with {connection:?}");
-                self.mode = EmulatorViewMode::Client(ClientView);
-                thread::sleep(Duration::from_secs_f32(0.05));
-                connection
-            }
-            EmulatorViewMode::Single(_) => panic!(),
-        }
-    }
-    pub fn to_single(&mut self) -> Option<Receiver<EmulatorEvents>> {
-        match self.mode {
-            EmulatorViewMode::Host(_) => panic!(),
-            EmulatorViewMode::Client(_) => panic!("already client"),
-            EmulatorViewMode::OffView(_) => {
-                let (sender, recv) = mpsc::channel();
-                self.mode = EmulatorViewMode::Single(SingleView { sender });
-                return Some(recv);
-            }
-            EmulatorViewMode::Single(_) => panic!(),
-        }
-    }
-    pub fn to_host(&mut self) -> Option<Receiver<EmulatorEvents>> {
-        match self.mode {
-            EmulatorViewMode::Host(_) => {
-                println!("already host");
-            }
-            EmulatorViewMode::Client(_) => panic!(),
-            EmulatorViewMode::OffView(_) => {
-                let connection = {
-                    let listener = TcpListener::bind(ADDR).unwrap();
-                    listener.set_nonblocking(true).unwrap();
-                    println!("start searching");
-                    let connection = listener.accept();
-                    // let connection = listener.incoming().next().unwrap();
-                    match connection {
-                        Ok(connection) => {
-                            println!("connection was successful");
-                            thread::sleep(Duration::from_secs_f32(0.05));
-                            Some(connection.0)
-                        }
-                        Err(e) => {
-                            println!("failed connecting with: {e}");
-                            None
-                        }
-                    }
-                };
-                let (sender, recv) = mpsc::channel();
-                self.mode = EmulatorViewMode::Host(HostView {
-                    sender,
-                    tcp: connection,
-                });
-                return Some(recv);
-            }
-            EmulatorViewMode::Single(_) => panic!(),
+    pub fn client(pixels: PixelRef) -> (Self, TcpStream) {
+        let connection = TcpStream::connect(ADDR).unwrap();
+        println!("CLIENT connected with {connection:?}");
+        let view = EmulatorView {
+            pixels,
+            mode: EmulatorViewMode::Client(ClientView),
         };
-        return None;
+        thread::sleep(Duration::from_secs_f32(0.05));
+        (view, connection)
+    }
+    pub fn single(pixels: PixelRef) -> (Self, Receiver<EmulatorEvents>) {
+        let (sender, recv) = mpsc::channel();
+        let view = EmulatorView {
+            pixels,
+            mode: EmulatorViewMode::Single(SingleView { sender }),
+        };
+        return (view, recv);
+    }
+    pub fn host(pixels: PixelRef) -> (Self, Receiver<EmulatorEvents>) {
+        let connection = {
+            let listener = TcpListener::bind(ADDR).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            println!("start searching");
+            let connection = listener.accept();
+            // let connection = listener.incoming().next().unwrap();
+            match connection {
+                Ok(connection) => {
+                    println!("connection was successful");
+                    thread::sleep(Duration::from_secs_f32(0.05));
+                    Some(connection.0)
+                }
+                Err(e) => {
+                    println!("failed connecting with: {e}");
+                    None
+                }
+            }
+        };
+        let (sender, recv) = mpsc::channel();
+        let view = EmulatorView {
+            mode: EmulatorViewMode::Host(HostView {
+                sender,
+                tcp: connection,
+            }),
+            pixels,
+        };
+        return (view, recv);
     }
     pub fn on_pixels<T>(&self, f: impl FnOnce(&Pixels) -> T) -> Option<T> {
         self.pixels.read().ok().map(|p| f(&p))

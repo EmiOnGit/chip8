@@ -201,31 +201,27 @@ fn spawn_emulator(
     event_bus: EventLoopProxy<AppEvents>,
     kind: EmulatorKind,
 ) {
+    let pixels = emulator_view.clone_pixel_buffer();
     match kind {
         EmulatorKind::Single => {
-            let recv = emulator_view.to_single();
-            let Some(recv) = recv else {
-                return;
-            };
-            let pixel_buffer = emulator_view.clone_pixel_buffer();
+            let (view, recv) = EmulatorView::single(Arc::clone(&pixels));
+            *emulator_view = view;
             thread::spawn(move || {
-                let chip8 = Chip8::new(event_bus, pixel_buffer, input_state, recv, config);
+                let chip8 = Chip8::new(event_bus, pixels, input_state, recv, config);
                 chip8.run();
             });
         }
         EmulatorKind::Server => {
-            let recv = emulator_view.to_host();
-            let Some(recv) = recv else {
-                return;
-            };
-            let pixel_buffer = emulator_view.clone_pixel_buffer();
+            let (view, recv) = EmulatorView::host(Arc::clone(&pixels));
+            *emulator_view = view;
             thread::spawn(move || {
-                let chip8 = Chip8::new(event_bus, pixel_buffer, input_state, recv, config);
+                let chip8 = Chip8::new(event_bus, pixels, input_state, recv, config);
                 chip8.run();
             });
         }
         EmulatorKind::Client => {
-            let mut tcp = emulator_view.to_client();
+            let (client, mut tcp) = EmulatorView::client(pixels);
+            *emulator_view = client;
             thread::spawn(move || loop {
                 let mut length_bytes = 0usize.to_be_bytes();
                 if let Err(e) = tcp.read_exact(&mut length_bytes) {
