@@ -1,4 +1,6 @@
-use egui::{ClippedPrimitive, Color32, ComboBox, Context, TexturesDelta};
+use std::path::PathBuf;
+
+use egui::{ClippedPrimitive, Color32, ComboBox, Context, ScrollArea, TexturesDelta};
 use egui_wgpu::renderer::{Renderer, ScreenDescriptor};
 use pixels::{wgpu, PixelsContext};
 use winit::event_loop::{EventLoop, EventLoopProxy};
@@ -6,9 +8,10 @@ use winit::window::Window;
 
 use crate::chip8::hardware::Generation;
 use crate::chip8::EmulatorEvents;
-use crate::display_bus::AppEvents;
+use crate::display_bus::{AppEvents, DebugState};
 
 use super::emulator_view::EmulatorView;
+use super::EmulatorKind;
 
 /// Manages all state required for rendering egui over `Pixels`.
 pub(crate) struct Framework {
@@ -22,17 +25,6 @@ pub(crate) struct Framework {
 
     // State for the GUI
     pub gui: Gui,
-}
-
-/// Example application state. A real application will need a lot more state than this.
-pub struct Gui {
-    pub color: Color32,
-    /// Only show the egui window when true.
-    window_open: bool,
-    pub event_bus: EventLoopProxy<AppEvents>,
-    pub debugger: Option<Debugger>,
-    start_debugger: bool,
-    generation: Generation,
 }
 
 impl Framework {
@@ -155,6 +147,23 @@ impl Framework {
         }
     }
 }
+/// Example application state. A real application will need a lot more state than this.
+pub struct Gui {
+    pub color: Color32,
+    /// Only show the egui window when true.
+    window_open: bool,
+    pub event_bus: EventLoopProxy<AppEvents>,
+    pub debugger: Option<Debugger>,
+    start_debugger: bool,
+    generation: Generation,
+    emulator_kind: EmulatorKind,
+    file: Option<PathBuf>,
+}
+#[derive(Default, Debug, PartialEq)]
+pub struct Debugger {
+    pub current: DebugState,
+    pub pc_hist: Vec<u16>,
+}
 
 impl Gui {
     /// Create a `Gui`.
@@ -166,13 +175,27 @@ impl Gui {
             debugger: None,
             start_debugger: true,
             generation: Generation::default(),
+            emulator_kind: EmulatorKind::Single,
+            file: None,
+        }
+    }
+    pub fn update_debugger(&mut self, state: DebugState) {
+        if let Some(debugger) = &mut self.debugger {
+            debugger.pc_hist.push(state.pc);
+            debugger.current = state;
+        } else {
+            let op = state.op;
+            self.debugger = Some(Debugger {
+                current: state,
+                pc_hist: vec![op],
+            });
         }
     }
 
     /// Create the UI using egui.
     fn ui(&mut self, ctx: &Context) {
         if let Some(debugger) = &self.debugger {
-            debugger.ui(ctx);
+            debugger.ui(ctx, &self.event_bus);
         }
         egui::TopBottomPanel::top("menubar_container").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
@@ -201,34 +224,50 @@ impl Gui {
                             format!("{:?}", Generation::COSMAC),
                         );
                     });
-                if ui.button("Create Emulator Client").clicked() {
-                    self.event_bus
-                        .send_event(AppEvents::SpawnEmulator {
-                            kind: super::EmulatorKind::Client,
-                            generation: self.generation,
-                        })
-                        .expect("couldn't send `SpawnEmulator` event to main app");
+                ComboBox::from_label("Emulator kind")
+                    .selected_text(format!("{:?}", self.emulator_kind))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.emulator_kind,
+                            EmulatorKind::Single,
+                            format!("{:?}", EmulatorKind::Single),
+                        );
+                        ui.selectable_value(
+                            &mut self.emulator_kind,
+                            EmulatorKind::Server,
+                            format!("{:?}", EmulatorKind::Server),
+                        );
+                        ui.selectable_value(
+                            &mut self.emulator_kind,
+                            EmulatorKind::Client,
+                            format!("{:?}", EmulatorKind::Client),
+                        );
+                    });
+                let file_name = self
+                    .file
+                    .as_ref()
+                    .map(|file| {
+                        file.file_name()
+                            .map(|n| n.to_str().unwrap())
+                            .unwrap_or_default()
+                    })
+                    .unwrap_or_default();
+                if ui.button(format!("program [{file_name:?}]")).clicked() {
+                    self.file = rfd::FileDialog::new().pick_file();
                 }
-                if ui.button("Create Emulator Server").clicked() {
+                if ui.button("Create Emulator").clicked() {
                     self.event_bus
                         .send_event(AppEvents::SpawnEmulator {
-                            kind: super::EmulatorKind::Server,
+                            kind: self.emulator_kind,
                             generation: self.generation,
+                            debugger: self.start_debugger,
+                            path: self.file.clone(),
                         })
                         .expect("couldn't send `SpawnEmulator` event to main app");
-                    if self.debugger.is_none() {
-                        self.debugger = Some(Debugger { pc: 10 });
-                    }
-                }
-                if ui.button("Create Emulator Single").clicked() {
-                    self.event_bus
-                        .send_event(AppEvents::SpawnEmulator {
-                            kind: super::EmulatorKind::Single,
-                            generation: self.generation,
-                        })
-                        .expect("couldn't send `SpawnEmulator` event to main app");
-                    if self.debugger.is_none() {
-                        self.debugger = Some(Debugger { pc: 10 });
+                    if self.start_debugger {
+                        self.debugger = Some(Debugger::default());
+                    } else {
+                        self.debugger = None;
                     }
                 }
                 ui.checkbox(&mut self.start_debugger, "debug");
@@ -253,13 +292,48 @@ impl Gui {
             });
     }
 }
-pub struct Debugger {
-    pc: usize,
-}
 impl Debugger {
-    fn ui(&self, ctx: &Context) {
+    fn ui(&self, ctx: &Context, event_bus: &EventLoopProxy<AppEvents>) {
+        let state = &self.current;
         egui::Window::new("Debugger").show(ctx, |ui| {
-            ui.label(format!("pc: {}", self.pc));
+            if ui.button("next").clicked() {
+                event_bus
+                    .send_event(AppEvents::EmulatorEvent(EmulatorEvents::NextDebugCycle(1)))
+                    .unwrap();
+            }
+            if ui.button("next 5").clicked() {
+                event_bus
+                    .send_event(AppEvents::EmulatorEvent(EmulatorEvents::NextDebugCycle(5)))
+                    .unwrap();
+            }
+            if ui.button("next 10").clicked() {
+                event_bus
+                    .send_event(AppEvents::EmulatorEvent(EmulatorEvents::NextDebugCycle(10)))
+                    .unwrap();
+            }
+            if ui.button("next 50").clicked() {
+                event_bus
+                    .send_event(AppEvents::EmulatorEvent(EmulatorEvents::NextDebugCycle(50)))
+                    .unwrap();
+            }
+            let label = |v, name| format!("{name}: [{v}] ({v:x})");
+            ui.label(label(state.pc, "pc"));
+            ui.label(label(state.op, "op"));
+            ui.label(label(state.i, "i"));
+            ui.separator();
+            let label = |v, name| format!("{name}: [{v}] ({v:x})");
+            for i in 0..state.reg.len() {
+                let name = i.to_string();
+                ui.label(label(state.reg[i] as u16, name));
+            }
+        });
+        egui::Window::new("History op").show(ctx, |ui| {
+            let label = |v, name| format!("{name}: [{v}] ({v:x})");
+            ScrollArea::vertical().max_height(800.).show(ui, |ui| {
+                for i in (0..self.pc_hist.len()).rev() {
+                    ui.label(label(self.pc_hist[i] as u16, i.to_string()));
+                }
+            });
         });
     }
 }

@@ -7,7 +7,7 @@ use std::thread;
 
 use crate::app::emulator_view::EmulatorViewMode;
 use crate::chip8::screen::{self};
-use crate::chip8::{Chip8, EmulatorConfig};
+use crate::chip8::{Chip8, EmulatorConfig, EmulatorEvents};
 use crate::display_bus::AppEvents;
 use crate::io::InputState;
 use log::error;
@@ -167,8 +167,18 @@ impl App {
                                 }
                             });
                         }
-                        AppEvents::SpawnEmulator { kind, generation } => {
-                            let config = EmulatorConfig::new(framework.gui.color, generation);
+                        AppEvents::SpawnEmulator {
+                            kind,
+                            generation,
+                            debugger,
+                            path,
+                        } => {
+                            let config = EmulatorConfig::new(
+                                framework.gui.color,
+                                generation,
+                                debugger,
+                                path,
+                            );
                             let event_bus = framework.gui.event_bus.clone();
                             spawn_emulator(
                                 &mut emulator_view,
@@ -180,6 +190,9 @@ impl App {
                         }
                         AppEvents::EmulatorEvent(event) => {
                             emulator_view.send(event);
+                        }
+                        AppEvents::DebugEmulatorState(state) => {
+                            framework.gui.update_debugger(state);
                         }
                     }
                 }
@@ -202,6 +215,9 @@ fn spawn_emulator(
     kind: EmulatorKind,
 ) {
     let pixels = emulator_view.clone_pixel_buffer();
+    // we close all emulators that may already be running
+    emulator_view.send(EmulatorEvents::QuitEmulator);
+    event_bus.send_event(AppEvents::ClearScreen).unwrap();
     match kind {
         EmulatorKind::Single => {
             let (view, recv) = EmulatorView::single(Arc::clone(&pixels));

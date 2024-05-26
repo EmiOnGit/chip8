@@ -1,4 +1,7 @@
 use std::{
+    fs,
+    path::PathBuf,
+    process::exit,
     sync::{mpsc::Receiver, Arc, RwLock},
     thread,
     time::{Duration, Instant},
@@ -9,7 +12,10 @@ use pixels::Pixels;
 use serde::{Deserialize, Serialize};
 use winit::event_loop::EventLoopProxy;
 
-use crate::{display_bus::AppEvents, io::InputState};
+use crate::{
+    display_bus::{AppEvents, DebugState},
+    io::InputState,
+};
 
 use self::hardware::{Generation, Hardware};
 pub mod hardware;
@@ -27,15 +33,29 @@ pub struct Chip8 {
 pub struct EmulatorConfig {
     color: Color32,
     generation: Generation,
+    debugger: bool,
+    path: Option<PathBuf>,
 }
 impl EmulatorConfig {
-    pub fn new(color: Color32, generation: Generation) -> EmulatorConfig {
-        Self { color, generation }
+    pub fn new(
+        color: Color32,
+        generation: Generation,
+        debugger: bool,
+        path: Option<PathBuf>,
+    ) -> EmulatorConfig {
+        Self {
+            color,
+            generation,
+            debugger,
+            path,
+        }
     }
 }
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum EmulatorEvents {
     ChangeColor(Color32),
+    NextDebugCycle(usize),
+    QuitEmulator,
 }
 impl Chip8 {
     pub fn new(
@@ -47,8 +67,13 @@ impl Chip8 {
     ) -> Chip8 {
         let mut hardware = Hardware::default();
         hardware.set_generation(emulator_config.generation);
-        hardware.load_program(include_bytes!("../tetris.ch8"));
-        // hardware.load_program(include_bytes!("../1dcell.ch8"));
+        let program = emulator_config
+            .path
+            .as_ref()
+            .map(|path| fs::read(path).ok())
+            .flatten()
+            .unwrap_or(include_bytes!("../tetris.ch8").to_vec());
+        hardware.load_program(&program);
         Chip8 {
             event_bus,
             display_bus,
@@ -63,11 +88,10 @@ impl Chip8 {
         self.hardware
             .decode(instr, &mut self.display_bus, &self.pixels, &self.input);
     }
-    pub fn handle_event(&mut self) {
+    pub fn handle_event(&mut self) -> Quit {
         if let Ok(event) = self.event_bus.try_recv() {
             match event {
                 EmulatorEvents::ChangeColor(c) => {
-                    println!("got event");
                     self.config.color = c;
                     if let Ok(mut pixels) = self.pixels.write() {
                         pixels
@@ -77,25 +101,63 @@ impl Chip8 {
                             .for_each(|c| c.copy_from_slice(&self.config.color.to_array()));
                     }
                 }
+                EmulatorEvents::NextDebugCycle(_) => {}
+                EmulatorEvents::QuitEmulator => return Quit::True,
             }
         }
+        Quit::False
+    }
+    fn send_debug_state(&self) {
+        let instr = ((self.hardware.memory[self.hardware.pc as usize] as u16) << 8)
+            | self.hardware.memory[self.hardware.pc as usize + 1] as u16;
+        let debug_state = DebugState {
+            pc: self.hardware.pc,
+            i: self.hardware.i,
+            reg: self.hardware.registers.clone(),
+            op: instr,
+        };
+        self.display_bus
+            .send_event(AppEvents::DebugEmulatorState(debug_state))
+            .unwrap();
     }
     pub fn run(mut self) {
-        let mut last_sec = Instant::now();
-        let fps = 60;
-        loop {
-            for _ in 0..fps {
-                self.handle_event();
-                for _ in 0..15 {
-                    self.run_hardware_cycle();
+        if self.config.debugger {
+            loop {
+                let clock_counter = 0;
+                if let Ok(event) = self.event_bus.recv() {
+                    if let EmulatorEvents::NextDebugCycle(count) = event {
+                        for _ in 0..count {
+                            if clock_counter % 12 == 0 {
+                                self.hardware.tick_cpu_clock();
+                            }
+                            self.run_hardware_cycle();
+                            self.send_debug_state();
+                        }
+                    }
+                    if matches!(event, EmulatorEvents::QuitEmulator) {
+                        return;
+                    }
                 }
-                self.hardware.tick_cpu_clock();
             }
-            thread::sleep(remaining_sec(last_sec));
-            last_sec = Instant::now();
+        }
+        let fps = 30.;
+        let frame_time = Duration::from_secs_f32(1. / fps);
+        loop {
+            let now = Instant::now();
+            let quit = self.handle_event();
+            if matches!(quit, Quit::True) {
+                return;
+            }
+            for _ in 0..8 {
+                self.run_hardware_cycle();
+            }
+            self.hardware.tick_cpu_clock();
+            let delta = frame_time - now.elapsed();
+            thread::sleep(delta);
         }
     }
 }
-fn remaining_sec(instant: Instant) -> Duration {
-    Duration::from_secs_f32(1.) - instant.elapsed()
+pub enum Quit {
+    True,
+    False,
 }

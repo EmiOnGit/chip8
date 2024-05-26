@@ -32,16 +32,15 @@ const FONT: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
 pub struct Hardware {
-    memory: [u8; 4096],  // 4kb of RAM
-    stack: [u16; 32],    // The stack offers a max depth of 32 with 2 bytes per stack frame
-    stack_frame: i8,     // Current stack frame. Starts at -1 and is set to 0 on first use
-    i: u16,              // Represents the 16-bit Index register
-    registers: [u8; 16], // Represents the 16 registers
-    pc: u16,             // Program counter, set it to the initial memory offset
-    delay_timer: u8,     // Represents the delay timer that's decremented at 60hz if > 0
-    sound_timer: u8,     // The sound timer that's decremented at 60hz and plays a beep if > 0
+    pub memory: [u8; 4096],         // 4kb of RAM
+    stack: [u16; 32], // The stack offers a max depth of 32 with 2 bytes per stack frame
+    stack_frame: i8,  // Current stack frame. Starts at -1 and is set to 0 on first use
+    pub(crate) i: u16, // Represents the 16-bit Index register
+    pub(crate) registers: [u8; 16], // Represents the 16 registers
+    pub(crate) pc: u16, // Program counter, set it to the initial memory offset
+    delay_timer: u8,  // Represents the delay timer that's decremented at 60hz if > 0
+    sound_timer: u8,  // The sound timer that's decremented at 60hz and plays a beep if > 0
     generation: Generation,
-    rand_seed: u32,
 }
 #[derive(Default, Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Generation {
@@ -51,7 +50,6 @@ pub enum Generation {
 }
 impl Default for Hardware {
     fn default() -> Self {
-        let instant = Instant::now();
         let mut memory = [0; 4096];
         for i in 0..FONT.len() {
             memory[i] = FONT[i];
@@ -59,14 +57,13 @@ impl Default for Hardware {
         Hardware {
             memory,
             stack: [0; 32],
-            stack_frame: -1,
+            stack_frame: 0,
             i: 0,
             registers: [0; 16],
             pc: 0x200,
             delay_timer: 0,
             sound_timer: 0,
             generation: Generation::default(),
-            rand_seed: instant.elapsed().subsec_nanos().wrapping_mul(6029),
         }
     }
 }
@@ -113,15 +110,15 @@ impl Hardware {
             (0x0, 0x0, 0xe, 0x0) => bus.send_event(AppEvents::ClearScreen).unwrap(),
             // Return from subroutine
             (0x0, 0x0, 0xe, 0xe) => {
-                self.pc = self.stack[self.stack_frame as usize];
                 self.stack_frame -= 1;
+                self.pc = self.stack[self.stack_frame as usize];
             }
             // Jump
             (0x1, _, _, _) => self.pc = nnn,
             // Push subroutine
             (0x2, _, _, _) => {
-                self.stack_frame += 1;
                 self.stack[self.stack_frame as usize] = self.pc;
+                self.stack_frame += 1;
                 self.pc = nnn;
             }
             (0x3, _, _, _) => {
@@ -211,9 +208,7 @@ impl Hardware {
                 }
             },
             (0xc, _, _, _) => {
-                let number = self.rand_seed.to_be_bytes()[0];
-                self.rand_seed = self.rand_seed.wrapping_mul(7877);
-                self.rand_seed = self.rand_seed.rotate_right(1);
+                let number = fastrand::u8(..);
                 self.registers[x] = number & nn;
             }
             // display/draw
