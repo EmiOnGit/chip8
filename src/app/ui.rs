@@ -29,6 +29,8 @@ pub struct Gui {
     /// Only show the egui window when true.
     window_open: bool,
     pub event_bus: EventLoopProxy<AppEvents>,
+    pub debugger: Option<Debugger>,
+    start_debugger: bool,
 }
 
 impl Framework {
@@ -159,11 +161,16 @@ impl Gui {
             window_open: true,
             color: Color32::GREEN,
             event_bus,
+            debugger: None,
+            start_debugger: true,
         }
     }
 
     /// Create the UI using egui.
     fn ui(&mut self, ctx: &Context) {
+        if let Some(debugger) = &self.debugger {
+            debugger.ui(ctx);
+        }
         egui::TopBottomPanel::top("menubar_container").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -186,7 +193,12 @@ impl Gui {
                     self.event_bus
                         .send_event(AppEvents::SpawnEmulator { client: false })
                         .expect("couldn't send `SpawnEmulator` event to main app");
+                    if self.debugger.is_none() {
+                        self.debugger = Some(Debugger { pc: 10 });
+                    }
                 }
+                ui.checkbox(&mut self.start_debugger, "debug");
+
                 ui.label("This example demonstrates using egui with pixels.");
                 ui.label("Made with 💖 in San Francisco!");
                 if ui.color_edit_button_srgba(&mut self.color).changed() {
@@ -205,5 +217,15 @@ impl Gui {
                     ui.hyperlink("https://docs.rs/egui");
                 });
             });
+    }
+}
+pub struct Debugger {
+    pc: usize,
+}
+impl Debugger {
+    fn ui(&self, ctx: &Context) {
+        egui::Window::new("Debugger").show(ctx, |ui| {
+            ui.label(format!("pc: {}", self.pc));
+        });
     }
 }
