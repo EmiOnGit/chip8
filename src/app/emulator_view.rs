@@ -67,13 +67,15 @@ impl EmulatorView {
             EmulatorViewMode::OffView(_) => {
                 let connection = {
                     let listener = TcpListener::bind(ADDR).unwrap();
+                    listener.set_nonblocking(true).unwrap();
                     println!("start searching");
-                    let connection = listener.incoming().next().unwrap();
+                    let connection = listener.accept();
+                    // let connection = listener.incoming().next().unwrap();
                     match connection {
                         Ok(connection) => {
                             println!("connection was successful");
                             thread::sleep(Duration::from_secs_f32(0.05));
-                            Some(connection)
+                            Some(connection.0)
                         }
                         Err(e) => {
                             println!("failed connecting with: {e}");

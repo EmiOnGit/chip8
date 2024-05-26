@@ -2,6 +2,7 @@ pub mod emulator_view;
 mod ui;
 
 use std::io::{Read, Write};
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 use crate::app::emulator_view::EmulatorViewMode;
@@ -26,7 +27,9 @@ pub struct App {
     framework: Framework,
     emulator_view: EmulatorView,
     window: winit::window::Window,
+    input_state: InputStateRef,
 }
+pub type InputStateRef = Arc<RwLock<InputState>>;
 impl App {
     pub fn _display_bus(&self) -> EventLoopProxy<AppEvents> {
         self.event_loop.create_proxy()
@@ -58,12 +61,14 @@ impl App {
 
             framework
         };
+        let input_state = Arc::new(RwLock::new(InputState::default()));
         Ok(App {
             input,
             event_loop,
             framework,
             window,
             emulator_view,
+            input_state,
         })
     }
     pub fn run(self) -> Result<(), Error> {
@@ -73,8 +78,8 @@ impl App {
             mut framework,
             window,
             mut emulator_view,
+            input_state,
         } = self;
-        let mut world = World::new();
         event_loop.run(move |event, _, control_flow| {
             // Handle input events
             if input.update(&event) {
@@ -83,7 +88,9 @@ impl App {
                     *control_flow = ControlFlow::Exit;
                     return;
                 }
-                world.input.update(&input);
+                if let Ok(mut input_state) = input_state.write() {
+                    input_state.update(&input);
+                }
 
                 // Update the scale factor
                 if let Some(scale_factor) = input.scale_factor() {
@@ -174,7 +181,13 @@ impl App {
                         AppEvents::SpawnEmulator { client } => {
                             let config = EmulatorConfig::new(framework.gui.color);
                             let event_bus = framework.gui.event_bus.clone();
-                            spawn_emulator(&mut emulator_view, config, event_bus, client);
+                            spawn_emulator(
+                                &mut emulator_view,
+                                config,
+                                Arc::clone(&input_state),
+                                event_bus,
+                                client,
+                            );
                         }
                         AppEvents::EmulatorEvent(event) => {
                             emulator_view.send(event);
@@ -189,6 +202,7 @@ impl App {
 fn spawn_emulator(
     emulator_view: &mut EmulatorView,
     config: EmulatorConfig,
+    input_state: InputStateRef,
     event_bus: EventLoopProxy<AppEvents>,
     is_client: bool,
 ) {
@@ -216,20 +230,8 @@ fn spawn_emulator(
         };
         let pixel_buffer = emulator_view.clone_pixel_buffer();
         thread::spawn(move || {
-            let chip8 = Chip8::new(event_bus, pixel_buffer, recv, config);
+            let chip8 = Chip8::new(event_bus, pixel_buffer, input_state, recv, config);
             chip8.run();
         });
-    }
-}
-/// Representation of the application state. In this example, a box will bounce around the screen.
-struct World {
-    input: InputState,
-}
-impl World {
-    /// Create a new `World` instance that can draw a moving box.
-    fn new() -> Self {
-        Self {
-            input: InputState::default(),
-        }
     }
 }

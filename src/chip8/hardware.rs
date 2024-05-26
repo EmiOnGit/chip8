@@ -1,4 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    sync::{Arc, RwLock},
+    time::Instant,
+};
 
 use pixels::Pixels;
 use winit::event_loop::EventLoopProxy;
@@ -6,6 +9,7 @@ use winit::event_loop::EventLoopProxy;
 use crate::{
     chip8::screen::{SCREEN_HEIGHT, SCREEN_WIDTH},
     display_bus::AppEvents,
+    io::InputState,
 };
 
 const FONT: [u8; 80] = [
@@ -35,9 +39,16 @@ pub struct Hardware {
     pc: u16,             // Program counter, set it to the initial memory offset
     delay_timer: u8,     // Represents the delay timer that's decremented at 60hz if > 0
     sound_timer: u8,     // The sound timer that's decremented at 60hz and plays a beep if > 0
+    generation: Generation,
+    rand_seed: u32,
+}
+pub enum Generation {
+    COSMAC,
+    Super,
 }
 impl Default for Hardware {
     fn default() -> Self {
+        let instant = Instant::now();
         let mut memory = [0; 4096];
         for i in 0..FONT.len() {
             memory[i] = FONT[i];
@@ -51,6 +62,8 @@ impl Default for Hardware {
             pc: 0x200,
             delay_timer: 0,
             sound_timer: 0,
+            generation: Generation::COSMAC,
+            rand_seed: instant.elapsed().subsec_nanos().wrapping_mul(6029),
         }
     }
 }
@@ -65,11 +78,19 @@ impl Hardware {
         self.pc += 2;
         instr
     }
+    pub fn set_flag(&mut self, is_set: bool) {
+        if is_set {
+            self.registers[15] = 1;
+        } else {
+            self.registers[15] = 0;
+        }
+    }
     pub fn decode(
         &mut self,
         instr: u16,
         bus: &mut EventLoopProxy<AppEvents>,
         pixel_buffer: &Arc<RwLock<Pixels>>,
+        input: &Arc<RwLock<InputState>>,
     ) {
         let b0 = (instr & 0xFF00) >> 8 as u8; // To get first byte, & the 8 leftmost bits which removes the 8 rightmost, then shift by 8 to the right to make the u8 conversion contain the bits originally on the left.
                                               // println!("instr: {instr:x}, pc: {pc:x}", pc = self.pc);
@@ -97,6 +118,21 @@ impl Hardware {
                 self.stack[self.stack_frame as usize] = self.pc;
                 self.pc = nnn;
             }
+            (0x3, _, _, _) => {
+                if self.registers[x] == nn {
+                    self.pc += 2;
+                }
+            }
+            (0x4, _, _, _) => {
+                if self.registers[x] != nn {
+                    self.pc += 2;
+                }
+            }
+            (0x5, _, _, 0) => {
+                if self.registers[x] == self.registers[y] {
+                    self.pc += 2;
+                }
+            }
             // Set register
             (0x6, _, _, _) => {
                 self.registers[x] = nn;
@@ -106,16 +142,80 @@ impl Hardware {
                 let current = self.registers[x];
                 self.registers[x] = current.wrapping_add(nn);
             }
+            (0x8, _, _, 0) => {
+                self.registers[x] = self.registers[y];
+            }
+            (0x8, _, _, 1) => {
+                self.registers[x] = self.registers[x] | self.registers[y];
+            }
+            (0x8, _, _, 2) => {
+                self.registers[x] = self.registers[x] & self.registers[y];
+            }
+            (0x8, _, _, 3) => {
+                self.registers[x] = self.registers[x] ^ self.registers[y];
+            }
+            (0x8, _, _, 4) => {
+                let overflow = self.registers[x].checked_add(self.registers[y]).is_none();
+                self.registers[x] = self.registers[x].wrapping_add(self.registers[y]);
+                self.set_flag(overflow);
+            }
+            (0x8, _, _, 5) => {
+                let flag = self.registers[x] >= self.registers[y];
+                self.registers[x] = self.registers[x].wrapping_sub(self.registers[y]);
+                self.set_flag(flag);
+            }
+            (0x8, _, _, 6) => {
+                match self.generation {
+                    Generation::COSMAC => {
+                        self.registers[x] = self.registers[y];
+                    }
+                    Generation::Super => {}
+                }
+                let flag = self.registers[x] & 1 == 1;
+                self.registers[x] = self.registers[x] >> 1;
+                self.set_flag(flag);
+            }
+            (0x8, _, _, 7) => {
+                let flag = self.registers[x] <= self.registers[y];
+                self.registers[x] = self.registers[y].wrapping_sub(self.registers[x]);
+                self.set_flag(flag);
+            }
+            (0x8, _, _, 0xe) => {
+                if matches!(self.generation, Generation::COSMAC) {
+                    self.registers[x] = self.registers[y];
+                }
+                let flag = self.registers[x] & 0b1000_0000 != 0;
+                self.registers[x] = self.registers[x] << 1;
+                self.set_flag(flag);
+            }
+
+            (0x9, _, _, 0) => {
+                if self.registers[x] != self.registers[y] {
+                    self.pc += 2;
+                }
+            }
             // Set index register I
             (0xa, _, _, _) => {
                 self.i = nnn;
+            }
+            (0xb, _, _, _) => match self.generation {
+                Generation::COSMAC => self.pc = self.registers[0] as u16 + nnn,
+                Generation::Super => {
+                    self.pc = self.registers[x] as u16 + nnn;
+                }
+            },
+            (0xc, _, _, _) => {
+                let number = self.rand_seed.to_be_bytes()[0];
+                self.rand_seed = self.rand_seed.wrapping_mul(7877);
+                self.rand_seed = self.rand_seed.rotate_right(1);
+                self.registers[x] = number & nn;
             }
             // display/draw
             (0xd, reg_x, reg_y, sprite_height) => {
                 let x = self.registers[reg_x] % SCREEN_WIDTH as u8;
                 let y = self.registers[reg_y] % SCREEN_HEIGHT as u8;
                 // set flag register to 0
-                self.registers[15] = 0;
+                self.set_flag(false);
                 let i = self.i;
                 let mut sprite: [u8; 16] = [0; 16];
                 for n in 0..sprite_height {
@@ -135,8 +235,11 @@ impl Hardware {
                 'check_flag: for (i_row, sprite_row) in sprite.into_iter().enumerate() {
                     let start = first_pixel + i_row * SCREEN_WIDTH as usize;
                     for b in 0..8 {
-                        if set_pixels[start + b] && sprite_row & (1 << (7 - b)) != 0 {
-                            self.registers[15] = 1;
+                        let Some(pixel_is_set) = set_pixels.get(start + b) else {
+                            continue 'check_flag;
+                        };
+                        if *pixel_is_set && sprite_row & (1 << (7 - b)) != 0 {
+                            self.set_flag(true);
                             break 'check_flag;
                         }
                     }
@@ -144,10 +247,79 @@ impl Hardware {
                 bus.send_event(AppEvents::DrawSprite { sprite, x, y })
                     .unwrap();
             }
+            (0xe, _, 9, 0xe) => {
+                let key = self.registers[x] % 16;
+                if let Ok(input) = input.read() {
+                    if input.keys & (1 << key) == 1 {
+                        self.pc += 2;
+                    }
+                }
+            }
+            (0xe, _, 0xa, 1) => {
+                let key = self.registers[x] % 16;
+                if let Ok(input) = input.read() {
+                    if input.keys & (1 << key) != 1 {
+                        self.pc += 2;
+                    }
+                }
+            }
+            (0xf, _, 0, 7) => {
+                self.registers[x] = self.delay_timer;
+            }
+            (0xf, _, 1, 5) => {
+                self.delay_timer = self.registers[x];
+            }
+            (0xf, _, 1, 8) => {
+                self.sound_timer = self.registers[x];
+            }
+            (0xf, _, 1, 0xe) => self.i = self.i.wrapping_add(self.registers[x] as u16),
+            (0xf, _, 0, 0xa) => {
+                if let Ok(input) = input.try_read() {
+                    // if any key is pressed
+                    if input.keys != 0 {
+                        self.registers[x] = input.keys.leading_zeros() as u8;
+                    } else {
+                        self.pc -= 2;
+                    }
+                }
+            }
+            (0xf, _, 2, 9) => {
+                let char = self.registers[x];
+                // each char is 5 bytes
+                self.i = 5 * char as u16;
+            }
+            (0xf, _, 3, 3) => {
+                let number = self.registers[x];
+                self.memory[self.i as usize] = number / 100;
+                self.memory[self.i as usize + 1] = (number % 100) / 10;
+                self.memory[self.i as usize + 2] = number % 10;
+            }
+            (0xf, _, 5, 5) => {
+                for i in 0..=x {
+                    self.memory[self.i as usize + i] = self.registers[i];
+                }
+                if matches!(self.generation, Generation::COSMAC) {
+                    self.i = self.i.wrapping_add(x as u16 + 1)
+                }
+            }
+            (0xf, _, 6, 5) => {
+                for i in 0..=x {
+                    self.registers[i] = self.memory[self.i as usize + i];
+                }
+                if matches!(self.generation, Generation::COSMAC) {
+                    self.i = self.i.wrapping_add(x as u16 + 1)
+                }
+            }
+
             _ => {
                 panic!()
             }
         }
+    }
+
+    pub fn tick_cpu_clock(&mut self) {
+        self.delay_timer = self.delay_timer.saturating_sub(1);
+        self.sound_timer = self.sound_timer.saturating_sub(1);
     }
 }
 impl Hardware {

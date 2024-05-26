@@ -1,5 +1,6 @@
 use std::{
     sync::{mpsc::Receiver, Arc, RwLock},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -8,7 +9,7 @@ use pixels::Pixels;
 use serde::{Deserialize, Serialize};
 use winit::event_loop::EventLoopProxy;
 
-use crate::display_bus::AppEvents;
+use crate::{display_bus::AppEvents, io::InputState};
 
 use self::hardware::Hardware;
 pub mod hardware;
@@ -17,7 +18,7 @@ pub mod screen;
 pub struct Chip8 {
     display_bus: EventLoopProxy<AppEvents>,
     pixels: Arc<RwLock<Pixels>>,
-    device_timer: DeviceTimer,
+    input: Arc<RwLock<InputState>>,
     hardware: Hardware,
     event_bus: Receiver<EmulatorEvents>,
     config: EmulatorConfig,
@@ -39,24 +40,26 @@ impl Chip8 {
     pub fn new(
         display_bus: EventLoopProxy<AppEvents>,
         pixels: Arc<RwLock<Pixels>>,
+        input: Arc<RwLock<InputState>>,
         event_bus: Receiver<EmulatorEvents>,
         emulator_config: EmulatorConfig,
     ) -> Chip8 {
         let mut hardware = Hardware::default();
-        hardware.load_program(include_bytes!("../IBM Logo.ch8"));
+        hardware.load_program(include_bytes!("../tetris.ch8"));
+        // hardware.load_program(include_bytes!("../1dcell.ch8"));
         Chip8 {
             event_bus,
             display_bus,
-            device_timer: DeviceTimer::default(),
             pixels,
             hardware,
+            input,
             config: emulator_config,
         }
     }
     pub fn run_hardware_cycle(&mut self) {
         let instr = self.hardware.fetch();
         self.hardware
-            .decode(instr, &mut self.display_bus, &self.pixels);
+            .decode(instr, &mut self.display_bus, &self.pixels, &self.input);
     }
     pub fn handle_event(&mut self) {
         if let Ok(event) = self.event_bus.try_recv() {
@@ -76,40 +79,21 @@ impl Chip8 {
         }
     }
     pub fn run(mut self) {
+        let mut last_sec = Instant::now();
+        let fps = 60;
         loop {
-            self.handle_event();
-            self.run_hardware_cycle();
-            self.device_timer.next();
-        }
-    }
-}
-
-struct DeviceTimer {
-    last: Instant,
-    counter: usize,
-}
-impl DeviceTimer {
-    const INSTR_PER_SEC: usize = 700;
-
-    pub fn next(&mut self) {
-        self.counter += 1;
-        if self.counter >= DeviceTimer::INSTR_PER_SEC {
-            let next = self.last + Duration::from_secs(1);
-            let time_left = next - Instant::now();
-            if time_left.as_secs_f32() < 0.001 {
-                println!("CRITICAL: time_left {:?}", time_left);
+            for _ in 0..fps {
+                self.handle_event();
+                for _ in 0..15 {
+                    self.run_hardware_cycle();
+                }
+                self.hardware.tick_cpu_clock();
             }
-            std::thread::sleep(time_left);
-            self.counter = 0;
-            self.last = Instant::now();
+            thread::sleep(remaining_sec(last_sec));
+            last_sec = Instant::now();
         }
     }
 }
-impl Default for DeviceTimer {
-    fn default() -> Self {
-        DeviceTimer {
-            last: Instant::now(),
-            counter: 0,
-        }
-    }
+fn remaining_sec(instant: Instant) -> Duration {
+    Duration::from_secs_f32(1.) - instant.elapsed()
 }
