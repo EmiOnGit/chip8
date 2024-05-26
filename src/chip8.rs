@@ -11,7 +11,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{display_bus::AppEvents, io::InputState};
 
-use self::hardware::Hardware;
+use self::hardware::{Generation, Hardware};
 pub mod hardware;
 pub mod screen;
 
@@ -26,10 +26,11 @@ pub struct Chip8 {
 
 pub struct EmulatorConfig {
     color: Color32,
+    generation: Generation,
 }
 impl EmulatorConfig {
-    pub fn new(color: Color32) -> EmulatorConfig {
-        Self { color }
+    pub fn new(color: Color32, generation: Generation) -> EmulatorConfig {
+        Self { color, generation }
     }
 }
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
@@ -45,6 +46,7 @@ impl Chip8 {
         emulator_config: EmulatorConfig,
     ) -> Chip8 {
         let mut hardware = Hardware::default();
+        hardware.set_generation(emulator_config.generation);
         hardware.load_program(include_bytes!("../tetris.ch8"));
         // hardware.load_program(include_bytes!("../1dcell.ch8"));
         Chip8 {

@@ -167,8 +167,8 @@ impl App {
                                 }
                             });
                         }
-                        AppEvents::SpawnEmulator { kind } => {
-                            let config = EmulatorConfig::new(framework.gui.color);
+                        AppEvents::SpawnEmulator { kind, generation } => {
+                            let config = EmulatorConfig::new(framework.gui.color, generation);
                             let event_bus = framework.gui.event_bus.clone();
                             spawn_emulator(
                                 &mut emulator_view,

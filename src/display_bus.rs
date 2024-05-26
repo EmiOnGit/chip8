@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{app::EmulatorKind, chip8::EmulatorEvents};
+use crate::{
+    app::EmulatorKind,
+    chip8::{hardware::Generation, EmulatorEvents},
+};
 
 #[derive(Default, Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum AppEvents {
@@ -15,5 +18,6 @@ pub enum AppEvents {
     },
     SpawnEmulator {
         kind: EmulatorKind,
+        generation: Generation,
     },
 }

@@ -4,6 +4,7 @@ use std::{
 };
 
 use pixels::Pixels;
+use serde::{Deserialize, Serialize};
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
@@ -42,8 +43,10 @@ pub struct Hardware {
     generation: Generation,
     rand_seed: u32,
 }
+#[derive(Default, Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Generation {
     COSMAC,
+    #[default]
     Super,
 }
 impl Default for Hardware {
@@ -62,12 +65,15 @@ impl Default for Hardware {
             pc: 0x200,
             delay_timer: 0,
             sound_timer: 0,
-            generation: Generation::COSMAC,
+            generation: Generation::default(),
             rand_seed: instant.elapsed().subsec_nanos().wrapping_mul(6029),
         }
     }
 }
 impl Hardware {
+    pub fn set_generation(&mut self, generation: Generation) {
+        self.generation = generation;
+    }
     pub fn load_program(&mut self, program: &[u8]) {
         let len = program.len();
         self.memory[0x200..0x200 + len].copy_from_slice(program);

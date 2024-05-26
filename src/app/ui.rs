@@ -1,9 +1,10 @@
-use egui::{ClippedPrimitive, Color32, Context, TexturesDelta};
+use egui::{ClippedPrimitive, Color32, ComboBox, Context, TexturesDelta};
 use egui_wgpu::renderer::{Renderer, ScreenDescriptor};
 use pixels::{wgpu, PixelsContext};
 use winit::event_loop::{EventLoop, EventLoopProxy};
 use winit::window::Window;
 
+use crate::chip8::hardware::Generation;
 use crate::chip8::EmulatorEvents;
 use crate::display_bus::AppEvents;
 
@@ -31,6 +32,7 @@ pub struct Gui {
     pub event_bus: EventLoopProxy<AppEvents>,
     pub debugger: Option<Debugger>,
     start_debugger: bool,
+    generation: Generation,
 }
 
 impl Framework {
@@ -163,6 +165,7 @@ impl Gui {
             event_bus,
             debugger: None,
             start_debugger: true,
+            generation: Generation::default(),
         }
     }
 
@@ -184,10 +187,25 @@ impl Gui {
         egui::Window::new("Hello, egui!")
             .open(&mut self.window_open)
             .show(ctx, |ui| {
+                ComboBox::from_label("Architecture")
+                    .selected_text(format!("{:?}", self.generation))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.generation,
+                            Generation::Super,
+                            format!("{:?}", Generation::Super),
+                        );
+                        ui.selectable_value(
+                            &mut self.generation,
+                            Generation::COSMAC,
+                            format!("{:?}", Generation::COSMAC),
+                        );
+                    });
                 if ui.button("Create Emulator Client").clicked() {
                     self.event_bus
                         .send_event(AppEvents::SpawnEmulator {
                             kind: super::EmulatorKind::Client,
+                            generation: self.generation,
                         })
                         .expect("couldn't send `SpawnEmulator` event to main app");
                 }
@@ -195,6 +213,7 @@ impl Gui {
                     self.event_bus
                         .send_event(AppEvents::SpawnEmulator {
                             kind: super::EmulatorKind::Server,
+                            generation: self.generation,
                         })
                         .expect("couldn't send `SpawnEmulator` event to main app");
                     if self.debugger.is_none() {
@@ -205,6 +224,7 @@ impl Gui {
                     self.event_bus
                         .send_event(AppEvents::SpawnEmulator {
                             kind: super::EmulatorKind::Single,
+                            generation: self.generation,
                         })
                         .expect("couldn't send `SpawnEmulator` event to main app");
                     if self.debugger.is_none() {
