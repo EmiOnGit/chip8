@@ -158,7 +158,7 @@ impl Hardware {
                 self.registers[x] = self.registers[x] ^ self.registers[y];
             }
             (0x8, _, _, 4) => {
-                let overflow = self.registers[x].checked_add(self.registers[y]).is_none();
+                let overflow = self.registers[x].checked_add(self.registers[y]).is_some();
                 self.registers[x] = self.registers[x].wrapping_add(self.registers[y]);
                 self.set_flag(overflow);
             }
