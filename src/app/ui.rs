@@ -174,7 +174,7 @@ impl Gui {
             color: Color32::GREEN,
             event_bus,
             debugger: None,
-            start_debugger: true,
+            start_debugger: false,
             generation: Generation::default(),
             emulator_kind: EmulatorKind::Single,
             file: None,
@@ -277,13 +277,19 @@ impl Gui {
                             fps: self.fps,
                         })
                         .expect("couldn't send `SpawnEmulator` event to main app");
+                }
+                if ui.checkbox(&mut self.start_debugger, "debug").clicked() {
                     if self.start_debugger {
                         self.debugger = Some(Debugger::default());
                     } else {
                         self.debugger = None;
                     }
+                    self.event_bus
+                        .send_event(AppEvents::EmulatorEvent(EmulatorEvents::SetDebug(
+                            self.start_debugger,
+                        )))
+                        .unwrap();
                 }
-                ui.checkbox(&mut self.start_debugger, "debug");
 
                 ui.label("This example demonstrates using egui with pixels.");
                 ui.label("Made with 💖 in San Francisco!");

@@ -32,7 +32,7 @@ pub struct Chip8 {
 pub struct EmulatorConfig {
     color: Color32,
     generation: Generation,
-    debugger: bool,
+    runner: Chip8Runner,
     path: Option<PathBuf>,
     fps: u32,
 }
@@ -40,14 +40,14 @@ impl EmulatorConfig {
     pub fn new(
         color: Color32,
         generation: Generation,
-        debugger: bool,
+        debug: bool,
         path: Option<PathBuf>,
         fps: u32,
     ) -> EmulatorConfig {
         Self {
             color,
             generation,
-            debugger,
+            runner: Chip8Runner::new(debug),
             path,
             fps,
         }
@@ -58,6 +58,7 @@ pub enum EmulatorEvents {
     ChangeColor(Color32),
     FpsChange(u32),
     NextDebugCycle(usize),
+    SetDebug(bool),
     QuitEmulator,
     DisplaySynced,
 }
@@ -105,10 +106,22 @@ impl Chip8 {
                             .for_each(|c| c.copy_from_slice(&self.config.color.to_array()));
                     }
                 }
-                EmulatorEvents::NextDebugCycle(_) => {}
+                EmulatorEvents::NextDebugCycle(count) => {
+                    if let Chip8RunnerKind::DebugRunner { cycles_to_run } =
+                        &mut self.config.runner.kind
+                    {
+                        *cycles_to_run += count;
+                    }
+                }
                 EmulatorEvents::QuitEmulator => return Quit::True,
                 EmulatorEvents::DisplaySynced => self.hardware.display_sync = true,
                 EmulatorEvents::FpsChange(fps) => self.config.fps = fps,
+                EmulatorEvents::SetDebug(debug) => {
+                    if debug && self.config.runner.is_debug() {
+                        return Quit::False;
+                    }
+                    self.config.runner = Chip8Runner::new(debug);
+                }
             }
         }
         Quit::False
@@ -127,41 +140,83 @@ impl Chip8 {
             .unwrap();
     }
     pub fn run(mut self) {
-        if self.config.debugger {
-            loop {
-                let clock_counter = 0;
-                if let Ok(event) = self.event_bus.recv() {
-                    if let EmulatorEvents::NextDebugCycle(count) = event {
-                        for _ in 0..count {
-                            if clock_counter % 12 == 0 {
-                                self.hardware.tick_cpu_clock();
-                            }
-                            self.run_hardware_cycle();
-                            self.send_debug_state();
-                        }
-                    }
-                    if matches!(event, EmulatorEvents::QuitEmulator) {
-                        return;
-                    }
-                    if matches!(event, EmulatorEvents::DisplaySynced) {
-                        self.hardware.display_sync = true;
-                    }
-                }
-            }
-        }
         loop {
-            let frame_time = Duration::from_secs_f32(1. / self.config.fps as f32);
             let now = Instant::now();
             let quit = self.handle_event();
             if matches!(quit, Quit::True) {
                 return;
             }
-            for _ in 0..8 {
-                self.run_hardware_cycle();
+            if self.runner().can_run() {
+                self.config.runner.advance();
+                if self.runner().is_debug() {
+                    self.run_hardware_cycle();
+                    if self.runner().hardware_clock_tick() {
+                        self.hardware.tick_cpu_clock();
+                    }
+                    self.send_debug_state();
+                } else {
+                    let frame_time = Duration::from_secs_f32(1. / self.config.fps as f32);
+                    self.run_hardware_cycle();
+                    if self.runner().hardware_clock_tick() {
+                        self.hardware.tick_cpu_clock();
+                        let delta = frame_time.saturating_sub(now.elapsed());
+                        thread::sleep(delta);
+                    }
+                }
             }
-            self.hardware.tick_cpu_clock();
-            let delta = frame_time.saturating_sub(now.elapsed());
-            thread::sleep(delta);
+        }
+    }
+    fn runner(&self) -> &Chip8Runner {
+        &self.config.runner
+    }
+}
+pub struct Chip8Runner {
+    kind: Chip8RunnerKind,
+    cycles: u32,
+}
+impl Chip8Runner {
+    pub fn new(debug: bool) -> Chip8Runner {
+        Chip8Runner {
+            kind: Chip8RunnerKind::new(debug),
+            cycles: 0,
+        }
+    }
+    pub fn is_debug(&self) -> bool {
+        matches!(self.kind, Chip8RunnerKind::DebugRunner { cycles_to_run: _ })
+    }
+    pub fn hardware_clock_tick(&self) -> bool {
+        let hardware_cycles_per_clock_tick = 8;
+        self.cycles % hardware_cycles_per_clock_tick == 0
+    }
+    pub fn advance(&mut self) {
+        self.kind.advance();
+        self.cycles += 1;
+    }
+    pub fn can_run(&self) -> bool {
+        self.kind.can_run()
+    }
+}
+pub enum Chip8RunnerKind {
+    DebugRunner { cycles_to_run: usize },
+    NormalRunner,
+}
+impl Chip8RunnerKind {
+    pub fn new(debug: bool) -> Chip8RunnerKind {
+        if debug {
+            Chip8RunnerKind::DebugRunner { cycles_to_run: 0 }
+        } else {
+            Chip8RunnerKind::NormalRunner
+        }
+    }
+    pub fn advance(&mut self) {
+        if let Chip8RunnerKind::DebugRunner { cycles_to_run } = self {
+            *cycles_to_run -= 1;
+        }
+    }
+    pub fn can_run(&self) -> bool {
+        match self {
+            Chip8RunnerKind::DebugRunner { cycles_to_run } => *cycles_to_run > 0,
+            Chip8RunnerKind::NormalRunner => true,
         }
     }
 }
