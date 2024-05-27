@@ -258,17 +258,17 @@ impl Hardware {
                 }
             }
             (0xe, _, 9, 0xe) => {
-                let key = self.registers[x] % 16;
+                let key = self.registers[x];
                 if let Ok(input) = input.read() {
-                    if input.keys & (1 << key) == 1 {
+                    if input.keys & (1 << key) != 0 {
                         self.pc += 2;
                     }
                 }
             }
             (0xe, _, 0xa, 1) => {
-                let key = self.registers[x] % 16;
+                let key = self.registers[x];
                 if let Ok(input) = input.read() {
-                    if input.keys & (1 << key) != 1 {
+                    if input.keys & (1 << key) == 0 {
                         self.pc += 2;
                     }
                 }
