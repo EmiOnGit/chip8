@@ -171,7 +171,7 @@ impl Gui {
     fn new(event_bus: EventLoopProxy<AppEvents>) -> Self {
         Self {
             window_open: true,
-            color: Color32::GREEN,
+            color: Color32::LIGHT_GRAY,
             event_bus,
             debugger: None,
             start_debugger: false,

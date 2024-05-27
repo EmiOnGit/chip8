@@ -31,10 +31,19 @@ pub struct EmulatorView {
     pub mode: EmulatorViewMode,
 }
 impl EmulatorView {
-    pub fn send(&self, event: EmulatorEvents) {
+    pub fn send(&mut self, event: EmulatorEvents) {
         match &self.mode {
             EmulatorViewMode::Host(host) => host.sender.send(event).unwrap(),
-            EmulatorViewMode::Client(_) => {}
+            EmulatorViewMode::Client(_) => match event {
+                EmulatorEvents::ChangeColor(new_color) => self.on_pixels_mut(|pixels| {
+                    pixels
+                        .frame_mut()
+                        .chunks_mut(4)
+                        .filter(|c| *c != [0, 0, 0, 0])
+                        .for_each(|c| c.clone_from_slice(&new_color.to_array()))
+                }),
+                _ => {}
+            },
             EmulatorViewMode::OffView(_) => {}
             EmulatorViewMode::Single(single) => single.sender.send(event).unwrap(),
         }
