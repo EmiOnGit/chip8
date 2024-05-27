@@ -3,6 +3,8 @@ mod ui;
 
 use std::fmt::Display;
 use std::io::Read;
+use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -20,7 +22,7 @@ use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy
 use winit::window::WindowBuilder;
 use winit_input_helper::WinitInputHelper;
 
-use self::emulator_view::EmulatorView;
+use self::emulator_view::{EmulatorView, PORT};
 use self::ui::Framework;
 
 pub struct App {
@@ -247,7 +249,23 @@ fn spawn_emulator(
             });
         }
         EmulatorKind::Server { ip } => {
-            let (view, recv) = EmulatorView::host(Arc::clone(&pixels));
+            let ip = match ip {
+                HostIp::Empty => {
+                    println!("couldn't start server. No host ip");
+                    return;
+                }
+                HostIp::NotFound => {
+                    println!("couldn't start server. Host ip could no be found");
+                    return;
+                }
+                HostIp::Ip(ip) => ip,
+            };
+            let Ok(ip) = IpAddr::from_str(&ip) else {
+                println!("couldn't convert {} to ip addr", ip);
+                return;
+            };
+            let socket_addr = SocketAddr::new(ip, PORT);
+            let (view, recv) = EmulatorView::host(Arc::clone(&pixels), socket_addr);
             *emulator_view = view;
             thread::spawn(move || {
                 let chip8 = Chip8::new(event_bus, pixels, input_state, recv, config);
@@ -255,7 +273,12 @@ fn spawn_emulator(
             });
         }
         EmulatorKind::Client { host_ip } => {
-            let (client, mut tcp) = EmulatorView::client(pixels);
+            let Ok(ip) = IpAddr::from_str(&host_ip) else {
+                println!("couldn't convert {} to ip addr", host_ip);
+                return;
+            };
+            let socket_addr = SocketAddr::new(ip, PORT);
+            let (client, mut tcp) = EmulatorView::client(pixels, socket_addr);
             *emulator_view = client;
             thread::spawn(move || loop {
                 let mut length_bytes = 0usize.to_be_bytes();

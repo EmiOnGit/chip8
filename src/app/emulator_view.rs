@@ -1,6 +1,6 @@
 use std::{
     io::Write,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
+    net::{SocketAddr, TcpListener, TcpStream},
     sync::{
         mpsc::{self, Receiver, Sender},
         Arc, RwLock,
@@ -23,7 +23,7 @@ pub enum EmulatorViewMode {
     Single(SingleView),
     OffView(OffView),
 }
-const ADDR: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 4214));
+pub const PORT: u16 = 4442;
 
 pub type PixelRef = Arc<RwLock<Pixels>>;
 pub struct EmulatorView {
@@ -52,8 +52,8 @@ impl EmulatorView {
             mode: EmulatorViewMode::OffView(OffView {}),
         })
     }
-    pub fn client(pixels: PixelRef) -> (Self, TcpStream) {
-        let connection = TcpStream::connect(ADDR).unwrap();
+    pub fn client(pixels: PixelRef, host_addr: SocketAddr) -> (Self, TcpStream) {
+        let connection = TcpStream::connect(host_addr).unwrap();
         println!("CLIENT connected with {connection:?}");
         let view = EmulatorView {
             pixels,
@@ -70,13 +70,11 @@ impl EmulatorView {
         };
         return (view, recv);
     }
-    pub fn host(pixels: PixelRef) -> (Self, Receiver<EmulatorEvents>) {
+    pub fn host(pixels: PixelRef, addr: SocketAddr) -> (Self, Receiver<EmulatorEvents>) {
         let connection = {
-            let listener = TcpListener::bind(ADDR).unwrap();
-            listener.set_nonblocking(true).unwrap();
+            let listener = TcpListener::bind(addr).unwrap();
             println!("start searching");
             let connection = listener.accept();
-            // let connection = listener.incoming().next().unwrap();
             match connection {
                 Ok(connection) => {
                     println!("connection was successful");
