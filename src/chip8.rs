@@ -77,7 +77,7 @@ impl Chip8 {
             .as_ref()
             .map(|path| fs::read(path).ok())
             .flatten()
-            .unwrap_or(include_bytes!("../tetris.ch8").to_vec());
+            .unwrap_or(include_bytes!("../assets/tetris.ch8").to_vec());
         hardware.load_program(&program);
         Chip8 {
             event_bus,

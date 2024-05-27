@@ -127,9 +127,6 @@ impl HostView {
         buffer.append(&mut bytes);
 
         tcp.write_all(&buffer).unwrap();
-        // println!("send mess");
-        // let mess = String::from("Hallo from server\n");
-        // tcp.write(&mess.into_bytes()).unwrap();
         tcp.flush().unwrap();
     }
 }
