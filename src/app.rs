@@ -2,7 +2,6 @@ pub mod emulator_view;
 mod ui;
 
 use std::fmt::Display;
-use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
@@ -13,7 +12,6 @@ use crate::chip8::screen::{self};
 use crate::chip8::{Chip8, EmulatorConfig, EmulatorEvents};
 use crate::display_bus::{AppEvents, ClientMessage};
 use crate::io::InputState;
-use log::error;
 use pixels::Error;
 use serde::{Deserialize, Serialize};
 use winit::dpi::LogicalSize;
@@ -112,7 +110,7 @@ impl App {
                 if let Some(size) = input.window_resized() {
                     emulator_view.on_pixels_mut(|pixels| {
                         if let Err(err) = pixels.resize_surface(size.width, size.height) {
-                            error!(target: "pixels.resize_surface", "{err}");
+                            eprintln!("pixels.resize_surface {err}");
                             *control_flow = ControlFlow::Exit;
                             return;
                         }
@@ -146,7 +144,7 @@ impl App {
 
                         // Basic error handling
                         if let Err(err) = render_result {
-                            error!(target: "pixels.render", "{err}");
+                            eprintln!("pixels.render {err}");
                             *control_flow = ControlFlow::Exit;
                         }
                     });
@@ -320,11 +318,12 @@ fn spawn_emulator(
     }
 }
 pub fn fetch_global_ip() -> Option<String> {
-    let mut ip = String::new();
-    let _resp = reqwest::blocking::get("https://api6.ipify.org")
-        .ok()?
-        .read_to_string(&mut ip)
-        .ok()?;
-    println!("fetch");
+    let resp = minreq::get("https://api6.ipify.org").send();
+    let Ok(resp) = resp else {
+        println!("resp {resp:?}");
+        return None;
+    };
+    let ip = resp.as_str().ok()?.to_string();
+    println!("Successfully fetched ip addr from ipify");
     Some(ip)
 }
