@@ -1,6 +1,7 @@
 pub mod emulator_view;
 mod ui;
 
+use std::fmt::Display;
 use std::io::Read;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -204,11 +205,26 @@ impl App {
         });
     }
 }
-#[derive(Deserialize, Serialize, PartialEq, Debug, Eq, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
+pub enum HostIp {
+    Empty,
+    NotFound,
+    Ip(String),
+}
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
 pub enum EmulatorKind {
     Single,
-    Server,
-    Client,
+    Server { ip: HostIp },
+    Client { host_ip: String },
+}
+impl Display for EmulatorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EmulatorKind::Single => write!(f, "Singleplayer"),
+            EmulatorKind::Server { ip: _ } => write!(f, "Server"),
+            EmulatorKind::Client { host_ip: _ } => write!(f, "Client"),
+        }
+    }
 }
 fn spawn_emulator(
     emulator_view: &mut EmulatorView,
@@ -230,7 +246,7 @@ fn spawn_emulator(
                 chip8.run();
             });
         }
-        EmulatorKind::Server => {
+        EmulatorKind::Server { ip } => {
             let (view, recv) = EmulatorView::host(Arc::clone(&pixels));
             *emulator_view = view;
             thread::spawn(move || {
@@ -238,7 +254,7 @@ fn spawn_emulator(
                 chip8.run();
             });
         }
-        EmulatorKind::Client => {
+        EmulatorKind::Client { host_ip } => {
             let (client, mut tcp) = EmulatorView::client(pixels);
             *emulator_view = client;
             thread::spawn(move || loop {
@@ -258,4 +274,13 @@ fn spawn_emulator(
             });
         }
     }
+}
+pub fn fetch_global_ip() -> Option<String> {
+    let mut ip = String::new();
+    let _resp = reqwest::blocking::get("https://api6.ipify.org")
+        .ok()?
+        .read_to_string(&mut ip)
+        .ok()?;
+    println!("fetch");
+    Some(ip)
 }

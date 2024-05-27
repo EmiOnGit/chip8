@@ -11,7 +11,7 @@ use crate::chip8::EmulatorEvents;
 use crate::display_bus::{AppEvents, DebugState};
 
 use super::emulator_view::EmulatorView;
-use super::EmulatorKind;
+use super::{fetch_global_ip, EmulatorKind, HostIp};
 
 /// Manages all state required for rendering egui over `Pixels`.
 pub(crate) struct Framework {
@@ -209,7 +209,7 @@ impl Gui {
                 })
             });
         });
-        egui::Window::new("Hello, egui!")
+        egui::Window::new("Chip8")
             .open(&mut self.window_open)
             .show(ctx, |ui| {
                 ComboBox::from_label("Architecture")
@@ -226,57 +226,65 @@ impl Gui {
                             format!("{:?}", Generation::COSMAC),
                         );
                     });
-                if ui
-                    .add(Slider::new(&mut self.fps, 1..=100).text("fps"))
-                    .changed()
-                {
-                    self.event_bus
-                        .send_event(AppEvents::EmulatorEvent(EmulatorEvents::FpsChange(
-                            self.fps,
-                        )))
-                        .unwrap();
-                }
                 ComboBox::from_label("Emulator kind")
-                    .selected_text(format!("{:?}", self.emulator_kind))
+                    .selected_text(format!("{}", self.emulator_kind))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
                             &mut self.emulator_kind,
                             EmulatorKind::Single,
-                            format!("{:?}", EmulatorKind::Single),
+                            "Singleplayer",
                         );
                         ui.selectable_value(
                             &mut self.emulator_kind,
-                            EmulatorKind::Server,
-                            format!("{:?}", EmulatorKind::Server),
+                            EmulatorKind::Server { ip: HostIp::Empty },
+                            "Server",
                         );
                         ui.selectable_value(
                             &mut self.emulator_kind,
-                            EmulatorKind::Client,
-                            format!("{:?}", EmulatorKind::Client),
+                            EmulatorKind::Client {
+                                host_ip: String::default(),
+                            },
+                            "Client",
                         );
                     });
-                let file_name = self
-                    .file
-                    .as_ref()
-                    .map(|file| {
-                        file.file_name()
-                            .map(|n| n.to_str().unwrap())
-                            .unwrap_or_default()
-                    })
-                    .unwrap_or_default();
-                if ui.button(format!("program [{file_name:?}]")).clicked() {
-                    self.file = rfd::FileDialog::new().pick_file();
+                if let EmulatorKind::Client { host_ip } = &mut self.emulator_kind {
+                    ui.horizontal(|ui| {
+                        ui.text_edit_singleline(host_ip);
+                        ui.label("host ip addr");
+                    });
                 }
-                if ui.button("Create Emulator").clicked() {
-                    self.event_bus
-                        .send_event(AppEvents::SpawnEmulator {
-                            kind: self.emulator_kind,
-                            generation: self.generation,
-                            debugger: self.start_debugger,
-                            path: self.file.clone(),
-                            fps: self.fps,
+                if let EmulatorKind::Server { ip } = &mut self.emulator_kind {
+                    if *ip == HostIp::Empty {
+                        match fetch_global_ip() {
+                            Some(fetched) => *ip = HostIp::Ip(fetched),
+                            None => *ip = HostIp::NotFound,
+                        }
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.link(format!("{ip:?}")).clicked() {
+                            if let HostIp::Ip(ip) = ip {
+                                ui.output_mut(|a| {
+                                    a.copied_text = ip.clone();
+                                    println!("ip: {:?}", a.copied_text);
+                                });
+                            }
+                        }
+                        ui.label("host ip addr");
+                    });
+                }
+                if !matches!(self.emulator_kind, EmulatorKind::Client { host_ip: _ }) {
+                    let file_name = self
+                        .file
+                        .as_ref()
+                        .map(|file| {
+                            file.file_name()
+                                .map(|n| n.to_str().unwrap())
+                                .unwrap_or_default()
                         })
-                        .expect("couldn't send `SpawnEmulator` event to main app");
+                        .unwrap_or_default();
+                    if ui.button(format!("program [{file_name:?}]")).clicked() {
+                        self.file = rfd::FileDialog::new().pick_file();
+                    }
                 }
                 if ui.checkbox(&mut self.start_debugger, "debug").clicked() {
                     if self.start_debugger {
@@ -291,8 +299,7 @@ impl Gui {
                         .unwrap();
                 }
 
-                ui.label("This example demonstrates using egui with pixels.");
-                ui.label("Made with 💖 in San Francisco!");
+                ui.separator();
                 if ui.color_edit_button_srgba(&mut self.color).changed() {
                     self.event_bus
                         .send_event(AppEvents::EmulatorEvent(EmulatorEvents::ChangeColor(
@@ -300,14 +307,28 @@ impl Gui {
                         )))
                         .unwrap();
                 }
-
+                if ui
+                    .add(Slider::new(&mut self.fps, 1..=100).text("fps"))
+                    .changed()
+                {
+                    self.event_bus
+                        .send_event(AppEvents::EmulatorEvent(EmulatorEvents::FpsChange(
+                            self.fps,
+                        )))
+                        .unwrap();
+                }
                 ui.separator();
-
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x /= 2.0;
-                    ui.label("Learn more about egui at");
-                    ui.hyperlink("https://docs.rs/egui");
-                });
+                if ui.button("Create Emulator").clicked() {
+                    self.event_bus
+                        .send_event(AppEvents::SpawnEmulator {
+                            kind: self.emulator_kind.clone(),
+                            generation: self.generation,
+                            debugger: self.start_debugger,
+                            path: self.file.clone(),
+                            fps: self.fps,
+                        })
+                        .expect("couldn't send `SpawnEmulator` event to main app");
+                }
             });
     }
 }
