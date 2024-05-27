@@ -185,7 +185,7 @@ impl Chip8Runner {
         matches!(self.kind, Chip8RunnerKind::DebugRunner { cycles_to_run: _ })
     }
     pub fn hardware_clock_tick(&self) -> bool {
-        let hardware_cycles_per_clock_tick = 30;
+        let hardware_cycles_per_clock_tick = 18;
         self.cycles % hardware_cycles_per_clock_tick == 0
     }
     pub fn advance(&mut self) {
