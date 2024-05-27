@@ -1,5 +1,5 @@
 use std::{
-    io::Write,
+    io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     sync::{
         mpsc::{self, Receiver, Sender},
@@ -66,7 +66,9 @@ impl EmulatorView {
         println!("CLIENT connected with {connection:?}");
         let view = EmulatorView {
             pixels,
-            mode: EmulatorViewMode::Client(ClientView),
+            mode: EmulatorViewMode::Client(ClientView {
+                tcp: connection.try_clone().unwrap(),
+            }),
         };
         thread::sleep(Duration::from_secs_f32(0.05));
         (view, connection)
@@ -79,24 +81,17 @@ impl EmulatorView {
         };
         return (view, recv);
     }
-    pub fn host(pixels: PixelRef, addr: SocketAddr) -> (Self, Receiver<EmulatorEvents>) {
+    pub fn host(pixels: PixelRef, addr: SocketAddr) -> (Self, Receiver<EmulatorEvents>, TcpStream) {
         let connection = {
             let listener = TcpListener::bind(addr).unwrap();
             println!("start searching");
-            let connection = listener.accept();
-            match connection {
-                Ok(connection) => {
-                    println!("connection was successful");
-                    thread::sleep(Duration::from_secs_f32(0.05));
-                    Some(connection.0)
-                }
-                Err(e) => {
-                    println!("failed connecting with: {e}");
-                    None
-                }
-            }
+            let (connection, addr) = listener.accept().unwrap();
+            println!("connection was successful with: {}", addr);
+            thread::sleep(Duration::from_secs_f32(0.05));
+            connection
         };
         let (sender, recv) = mpsc::channel();
+        let connection2 = connection.try_clone().unwrap();
         let view = EmulatorView {
             mode: EmulatorViewMode::Host(HostView {
                 sender,
@@ -104,7 +99,7 @@ impl EmulatorView {
             }),
             pixels,
         };
-        return (view, recv);
+        return (view, recv, connection2);
     }
     pub fn on_pixels<T>(&self, f: impl FnOnce(&Pixels) -> T) -> Option<T> {
         self.pixels.read().ok().map(|p| f(&p))
@@ -125,18 +120,33 @@ pub struct SingleView {
 }
 pub struct HostView {
     sender: Sender<EmulatorEvents>,
-    pub tcp: Option<TcpStream>,
+    pub tcp: TcpStream,
 }
-impl HostView {
-    pub fn send_over_tcp(&mut self, event: &AppEvents) {
-        let Some(tcp) = &mut self.tcp else { return };
-        let bytes = bincode::serialize(event);
-        let Ok(mut bytes) = bytes else { return };
-        let mut buffer = bytes.len().to_be_bytes().to_vec();
-        buffer.append(&mut bytes);
+impl HostView {}
+pub struct ClientView {
+    pub tcp: TcpStream,
+}
+pub fn send_over_tcp(tcp: &mut TcpStream, event: &AppEvents) {
+    let bytes = bincode::serialize(event);
+    let Ok(mut bytes) = bytes else { return };
+    let mut buffer = bytes.len().to_be_bytes().to_vec();
+    buffer.append(&mut bytes);
 
-        tcp.write_all(&buffer).unwrap();
-        tcp.flush().unwrap();
-    }
+    tcp.write_all(&buffer).unwrap();
+    tcp.flush().unwrap();
 }
-pub struct ClientView;
+pub fn receive_event_over_tcp(tcp: &mut TcpStream) -> Option<AppEvents> {
+    let mut length_bytes = 0usize.to_be_bytes();
+    if let Err(e) = tcp.read_exact(&mut length_bytes) {
+        println!("failed reading with: {e}");
+        return None;
+    };
+    let length = usize::from_be_bytes(length_bytes);
+    let mut message = vec![0; length];
+    if let Err(e) = tcp.read_exact(&mut message) {
+        println!("failed reading with: {e}");
+        return None;
+    };
+    let message: AppEvents = bincode::deserialize(&message).unwrap();
+    Some(message)
+}

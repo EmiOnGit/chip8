@@ -26,6 +26,11 @@ pub enum AppEvents {
         fps: u32,
     },
     DebugEmulatorState(DebugState),
+    ClientMessage(ClientMessage),
+}
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub enum ClientMessage {
+    KeyInput(u16),
 }
 #[derive(Default, Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct DebugState {

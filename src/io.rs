@@ -1,12 +1,14 @@
 // use std::sync::mpsc::{self, Receiver};
 
+use serde::{Deserialize, Serialize};
 use winit::event::VirtualKeyCode;
 use winit_input_helper::WinitInputHelper;
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Copy, Default)]
 pub struct InputState {
     pub quit: bool,
-    pub keys: u16,
+    keys: u16,
+    client: u16,
 }
 pub const KEY_MAP: [VirtualKeyCode; 16] = [
     // row 1
@@ -31,6 +33,9 @@ pub const KEY_MAP: [VirtualKeyCode; 16] = [
     VirtualKeyCode::V,
 ];
 impl InputState {
+    pub fn pressed(&self) -> u16 {
+        self.keys | self.client
+    }
     pub fn update(&mut self, input: &WinitInputHelper) {
         for (i, key) in KEY_MAP.into_iter().enumerate() {
             if input.key_pressed(key) {
@@ -40,5 +45,8 @@ impl InputState {
                 self.keys = self.keys & !(1 << i);
             }
         }
+    }
+    pub fn set_client_keys(&mut self, other: u16) {
+        self.client = other;
     }
 }

@@ -11,7 +11,7 @@ use std::thread;
 use crate::app::emulator_view::EmulatorViewMode;
 use crate::chip8::screen::{self};
 use crate::chip8::{Chip8, EmulatorConfig, EmulatorEvents};
-use crate::display_bus::AppEvents;
+use crate::display_bus::{AppEvents, ClientMessage};
 use crate::io::InputState;
 use log::error;
 use pixels::Error;
@@ -22,7 +22,7 @@ use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy
 use winit::window::WindowBuilder;
 use winit_input_helper::WinitInputHelper;
 
-use self::emulator_view::{EmulatorView, PORT};
+use self::emulator_view::{receive_event_over_tcp, send_over_tcp, EmulatorView, PORT};
 use self::ui::Framework;
 
 pub struct App {
@@ -94,6 +94,13 @@ impl App {
                 }
                 if let Ok(mut input_state) = input_state.write() {
                     input_state.update(&input);
+                    if let EmulatorViewMode::Client(client_view) = &mut emulator_view.mode {
+                        let input = input_state.pressed();
+                        send_over_tcp(
+                            &mut client_view.tcp,
+                            &AppEvents::ClientMessage(ClientMessage::KeyInput(input)),
+                        );
+                    }
                 }
 
                 // Update the scale factor
@@ -146,7 +153,7 @@ impl App {
                 }
                 Event::UserEvent(app_event) => {
                     if let EmulatorViewMode::Host(host_view) = &mut emulator_view.mode {
-                        host_view.send_over_tcp(&app_event);
+                        send_over_tcp(&mut host_view.tcp, &app_event);
                     }
                     match app_event {
                         AppEvents::Nop => println!("nop"),
@@ -199,6 +206,19 @@ impl App {
                         }
                         AppEvents::DebugEmulatorState(state) => {
                             framework.gui.update_debugger(state);
+                        }
+                        AppEvents::ClientMessage(client_message) => {
+                            // Client messages get send by clients and are only processed by the host
+                            if !matches!(emulator_view.mode, EmulatorViewMode::Host(_)) {
+                                return;
+                            }
+                            match client_message {
+                                ClientMessage::KeyInput(other_input) => {
+                                    if let Ok(mut input) = input_state.write() {
+                                        input.set_client_keys(other_input);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -265,8 +285,19 @@ fn spawn_emulator(
                 return;
             };
             let socket_addr = SocketAddr::new(ip, PORT);
-            let (view, recv) = EmulatorView::host(Arc::clone(&pixels), socket_addr);
+            let (view, recv, mut tcp) = EmulatorView::host(Arc::clone(&pixels), socket_addr);
             *emulator_view = view;
+            let event_bus2 = event_bus.clone();
+            thread::spawn(move || {
+                loop {
+                    if let Some(message) = receive_event_over_tcp(&mut tcp) {
+                        // only send messages to the app that are from a client
+                        if matches!(message, AppEvents::ClientMessage(_)) {
+                            event_bus2.send_event(message).unwrap();
+                        }
+                    }
+                }
+            });
             thread::spawn(move || {
                 let chip8 = Chip8::new(event_bus, pixels, input_state, recv, config);
                 chip8.run();
@@ -281,19 +312,9 @@ fn spawn_emulator(
             let (client, mut tcp) = EmulatorView::client(pixels, socket_addr);
             *emulator_view = client;
             thread::spawn(move || loop {
-                let mut length_bytes = 0usize.to_be_bytes();
-                if let Err(e) = tcp.read_exact(&mut length_bytes) {
-                    println!("failed reading with: {e}");
-                    return;
-                };
-                let length = usize::from_be_bytes(length_bytes);
-                let mut message = vec![0; length];
-                if let Err(e) = tcp.read_exact(&mut message) {
-                    println!("failed reading with: {e}");
-                    return;
-                };
-                let message: AppEvents = bincode::deserialize(&message).unwrap();
-                event_bus.send_event(message).unwrap();
+                if let Some(message) = receive_event_over_tcp(&mut tcp) {
+                    event_bus.send_event(message).unwrap();
+                }
             });
         }
     }

@@ -260,7 +260,8 @@ impl Hardware {
             (0xe, _, 9, 0xe) => {
                 let key = self.registers[x];
                 if let Ok(input) = input.read() {
-                    if input.keys & (1 << key) != 0 {
+                    let pressed_keys = input.pressed();
+                    if pressed_keys & (1 << key) != 0 {
                         self.pc += 2;
                     }
                 }
@@ -268,7 +269,8 @@ impl Hardware {
             (0xe, _, 0xa, 1) => {
                 let key = self.registers[x];
                 if let Ok(input) = input.read() {
-                    if input.keys & (1 << key) == 0 {
+                    let pressed_keys = input.pressed();
+                    if pressed_keys & (1 << key) == 0 {
                         self.pc += 2;
                     }
                 }
@@ -286,8 +288,9 @@ impl Hardware {
             (0xf, _, 0, 0xa) => {
                 if let Ok(input) = input.try_read() {
                     // if any key is pressed
-                    if input.keys != 0 {
-                        self.registers[x] = input.keys.leading_zeros() as u8;
+                    let pressed_keys = input.pressed();
+                    if pressed_keys != 0 {
+                        self.registers[x] = pressed_keys.leading_zeros() as u8;
                     } else {
                         self.pc -= 2;
                     }
