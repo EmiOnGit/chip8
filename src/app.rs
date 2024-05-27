@@ -166,18 +166,21 @@ impl App {
                                     );
                                 }
                             });
+                            emulator_view.send(EmulatorEvents::DisplaySynced);
                         }
                         AppEvents::SpawnEmulator {
                             kind,
                             generation,
                             debugger,
                             path,
+                            fps,
                         } => {
                             let config = EmulatorConfig::new(
                                 framework.gui.color,
                                 generation,
                                 debugger,
                                 path,
+                                fps,
                             );
                             let event_bus = framework.gui.event_bus.clone();
                             spawn_emulator(

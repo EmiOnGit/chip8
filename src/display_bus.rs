@@ -23,6 +23,7 @@ pub enum AppEvents {
         generation: Generation,
         debugger: bool,
         path: Option<PathBuf>,
+        fps: u32,
     },
     DebugEmulatorState(DebugState),
 }

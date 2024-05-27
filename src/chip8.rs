@@ -1,7 +1,6 @@
 use std::{
     fs,
     path::PathBuf,
-    process::exit,
     sync::{mpsc::Receiver, Arc, RwLock},
     thread,
     time::{Duration, Instant},
@@ -35,6 +34,7 @@ pub struct EmulatorConfig {
     generation: Generation,
     debugger: bool,
     path: Option<PathBuf>,
+    fps: u32,
 }
 impl EmulatorConfig {
     pub fn new(
@@ -42,20 +42,24 @@ impl EmulatorConfig {
         generation: Generation,
         debugger: bool,
         path: Option<PathBuf>,
+        fps: u32,
     ) -> EmulatorConfig {
         Self {
             color,
             generation,
             debugger,
             path,
+            fps,
         }
     }
 }
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum EmulatorEvents {
     ChangeColor(Color32),
+    FpsChange(u32),
     NextDebugCycle(usize),
     QuitEmulator,
+    DisplaySynced,
 }
 impl Chip8 {
     pub fn new(
@@ -103,6 +107,8 @@ impl Chip8 {
                 }
                 EmulatorEvents::NextDebugCycle(_) => {}
                 EmulatorEvents::QuitEmulator => return Quit::True,
+                EmulatorEvents::DisplaySynced => self.hardware.display_sync = true,
+                EmulatorEvents::FpsChange(fps) => self.config.fps = fps,
             }
         }
         Quit::False
@@ -137,12 +143,14 @@ impl Chip8 {
                     if matches!(event, EmulatorEvents::QuitEmulator) {
                         return;
                     }
+                    if matches!(event, EmulatorEvents::DisplaySynced) {
+                        self.hardware.display_sync = true;
+                    }
                 }
             }
         }
-        let fps = 30.;
-        let frame_time = Duration::from_secs_f32(1. / fps);
         loop {
+            let frame_time = Duration::from_secs_f32(1. / self.config.fps as f32);
             let now = Instant::now();
             let quit = self.handle_event();
             if matches!(quit, Quit::True) {
@@ -152,7 +160,7 @@ impl Chip8 {
                 self.run_hardware_cycle();
             }
             self.hardware.tick_cpu_clock();
-            let delta = frame_time - now.elapsed();
+            let delta = frame_time.saturating_sub(now.elapsed());
             thread::sleep(delta);
         }
     }

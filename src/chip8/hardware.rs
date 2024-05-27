@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, RwLock},
-    time::Instant,
-};
+use std::sync::{Arc, RwLock};
 
 use pixels::Pixels;
 use serde::{Deserialize, Serialize};
@@ -12,6 +9,8 @@ use crate::{
     display_bus::AppEvents,
     io::InputState,
 };
+
+use super::screen;
 
 const FONT: [u8; 80] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -41,6 +40,7 @@ pub struct Hardware {
     delay_timer: u8,  // Represents the delay timer that's decremented at 60hz if > 0
     sound_timer: u8,  // The sound timer that's decremented at 60hz and plays a beep if > 0
     generation: Generation,
+    pub(crate) display_sync: bool,
 }
 #[derive(Default, Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Generation {
@@ -64,6 +64,7 @@ impl Default for Hardware {
             delay_timer: 0,
             sound_timer: 0,
             generation: Generation::default(),
+            display_sync: true,
         }
     }
 }
@@ -158,7 +159,7 @@ impl Hardware {
                 self.registers[x] = self.registers[x] ^ self.registers[y];
             }
             (0x8, _, _, 4) => {
-                let overflow = self.registers[x].checked_add(self.registers[y]).is_some();
+                let overflow = self.registers[x].checked_add(self.registers[y]).is_none();
                 self.registers[x] = self.registers[x].wrapping_add(self.registers[y]);
                 self.set_flag(overflow);
             }
@@ -187,7 +188,7 @@ impl Hardware {
                 if matches!(self.generation, Generation::COSMAC) {
                     self.registers[x] = self.registers[y];
                 }
-                let flag = self.registers[x] & 0b1000_0000 != 0;
+                let flag = (self.registers[x] >> 7) == 1;
                 self.registers[x] = self.registers[x] << 1;
                 self.set_flag(flag);
             }
@@ -213,10 +214,14 @@ impl Hardware {
             }
             // display/draw
             (0xd, reg_x, reg_y, sprite_height) => {
+                if !self.display_sync {
+                    self.pc -= 2;
+                    return;
+                }
+                self.display_sync = false;
                 let x = self.registers[reg_x] % SCREEN_WIDTH as u8;
                 let y = self.registers[reg_y] % SCREEN_HEIGHT as u8;
                 // set flag register to 0
-                self.set_flag(false);
                 let i = self.i;
                 let mut sprite: [u8; 16] = [0; 16];
                 for n in 0..sprite_height {
@@ -224,29 +229,33 @@ impl Hardware {
                     let row = self.memory[row_start as usize];
                     sprite[n as usize] = row;
                 }
-                let mut bytebuffer: Vec<u8> = Vec::new();
+                let mut flip = false;
                 if let Ok(pixel_buffer) = pixel_buffer.read() {
-                    bytebuffer = pixel_buffer.frame().into_iter().map(|u| *u).collect();
-                }
-                let set_pixels: Vec<bool> = bytebuffer
-                    .chunks_exact(4)
-                    .map(|color| color != &[0, 0, 0, 0])
-                    .collect();
-                let first_pixel = x as usize + y as usize * SCREEN_WIDTH as usize;
-                'check_flag: for (i_row, sprite_row) in sprite.into_iter().enumerate() {
-                    let start = first_pixel + i_row * SCREEN_WIDTH as usize;
-                    for b in 0..8 {
-                        let Some(pixel_is_set) = set_pixels.get(start + b) else {
-                            continue 'check_flag;
-                        };
-                        if *pixel_is_set && sprite_row & (1 << (7 - b)) != 0 {
+                    bus.send_event(AppEvents::DrawSprite { sprite, x, y })
+                        .unwrap();
+                    for n in 0..16 {
+                        let row_i = y as usize + n as usize;
+                        let sprite_row = sprite[n as usize];
+                        if sprite_row == 0 {
+                            continue;
+                        }
+                        let screen_row = screen::pixel_row(&pixel_buffer, row_i);
+                        flip = screen_row
+                            .chunks_exact(4)
+                            .skip(x as usize)
+                            .take(8)
+                            .enumerate()
+                            .filter(|(i, _pixel)| sprite_row & (1 << (7 - i)) != 0)
+                            .any(|(_i, c)| *c != [0, 0, 0, 0]);
+                        if flip {
                             self.set_flag(true);
-                            break 'check_flag;
+                            break;
                         }
                     }
+                    if !flip {
+                        self.set_flag(false);
+                    }
                 }
-                bus.send_event(AppEvents::DrawSprite { sprite, x, y })
-                    .unwrap();
             }
             (0xe, _, 9, 0xe) => {
                 let key = self.registers[x] % 16;

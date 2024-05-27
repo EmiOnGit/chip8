@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use egui::{ClippedPrimitive, Color32, ComboBox, Context, ScrollArea, TexturesDelta};
+use egui::{ClippedPrimitive, Color32, ComboBox, Context, ScrollArea, Slider, TexturesDelta};
 use egui_wgpu::renderer::{Renderer, ScreenDescriptor};
 use pixels::{wgpu, PixelsContext};
 use winit::event_loop::{EventLoop, EventLoopProxy};
@@ -158,6 +158,7 @@ pub struct Gui {
     generation: Generation,
     emulator_kind: EmulatorKind,
     file: Option<PathBuf>,
+    fps: u32,
 }
 #[derive(Default, Debug, PartialEq)]
 pub struct Debugger {
@@ -177,6 +178,7 @@ impl Gui {
             generation: Generation::default(),
             emulator_kind: EmulatorKind::Single,
             file: None,
+            fps: 60,
         }
     }
     pub fn update_debugger(&mut self, state: DebugState) {
@@ -224,6 +226,16 @@ impl Gui {
                             format!("{:?}", Generation::COSMAC),
                         );
                     });
+                if ui
+                    .add(Slider::new(&mut self.fps, 1..=100).text("fps"))
+                    .changed()
+                {
+                    self.event_bus
+                        .send_event(AppEvents::EmulatorEvent(EmulatorEvents::FpsChange(
+                            self.fps,
+                        )))
+                        .unwrap();
+                }
                 ComboBox::from_label("Emulator kind")
                     .selected_text(format!("{:?}", self.emulator_kind))
                     .show_ui(ui, |ui| {
@@ -262,6 +274,7 @@ impl Gui {
                             generation: self.generation,
                             debugger: self.start_debugger,
                             path: self.file.clone(),
+                            fps: self.fps,
                         })
                         .expect("couldn't send `SpawnEmulator` event to main app");
                     if self.start_debugger {
