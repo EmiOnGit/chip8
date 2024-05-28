@@ -164,7 +164,7 @@ pub struct Gui {
 #[derive(Default, Debug, PartialEq)]
 pub struct Debugger {
     pub current: DebugState,
-    pub pc_hist: Vec<u16>,
+    pub op_hist: Vec<u16>,
 }
 
 impl Gui {
@@ -184,13 +184,13 @@ impl Gui {
     }
     pub fn update_debugger(&mut self, state: DebugState) {
         if let Some(debugger) = &mut self.debugger {
-            debugger.pc_hist.push(state.pc);
+            debugger.op_hist.push(state.op);
             debugger.current = state;
         } else {
             let op = state.op;
             self.debugger = Some(Debugger {
                 current: state,
-                pc_hist: vec![op],
+                op_hist: vec![op],
             });
         }
     }
@@ -376,8 +376,8 @@ impl Debugger {
         egui::Window::new("History op").show(ctx, |ui| {
             let label = |v, name| format!("{name}: [{v}] ({v:x})");
             ScrollArea::vertical().max_height(800.).show(ui, |ui| {
-                for i in (0..self.pc_hist.len()).rev() {
-                    ui.label(label(self.pc_hist[i] as u16, i.to_string()));
+                for i in (0..self.op_hist.len()).rev() {
+                    ui.label(label(self.op_hist[i] as u16, i.to_string()));
                 }
             });
         });

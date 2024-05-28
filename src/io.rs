@@ -11,25 +11,21 @@ pub struct InputState {
     client: u16,
 }
 pub const KEY_MAP: [VirtualKeyCode; 16] = [
-    // row 1
+    VirtualKeyCode::X,
     VirtualKeyCode::Key1,
     VirtualKeyCode::Key2,
     VirtualKeyCode::Key3,
-    VirtualKeyCode::Key4,
-    // row 2
     VirtualKeyCode::Q,
     VirtualKeyCode::W,
     VirtualKeyCode::E,
-    VirtualKeyCode::R,
-    // row 3
     VirtualKeyCode::A,
     VirtualKeyCode::S,
     VirtualKeyCode::D,
-    VirtualKeyCode::F,
-    // row 4
     VirtualKeyCode::Z,
-    VirtualKeyCode::X,
     VirtualKeyCode::C,
+    VirtualKeyCode::Key4,
+    VirtualKeyCode::R,
+    VirtualKeyCode::F,
     VirtualKeyCode::V,
 ];
 impl InputState {

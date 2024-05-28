@@ -327,7 +327,7 @@ impl Hardware {
             }
 
             _ => {
-                panic!("unknown op code: {instr:x}");
+                eprintln!("unknown op code: {instr:x}");
             }
         }
     }
