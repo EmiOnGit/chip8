@@ -44,16 +44,14 @@ pub struct Hardware {
 }
 #[derive(Default, Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Generation {
-    COSMAC,
+    Cosmac,
     #[default]
     Super,
 }
 impl Default for Hardware {
     fn default() -> Self {
         let mut memory = [0; 4096];
-        for i in 0..FONT.len() {
-            memory[i] = FONT[i];
-        }
+        memory[..FONT.len()].copy_from_slice(&FONT[..]);
         Hardware {
             memory,
             stack: [0; 32],
@@ -92,20 +90,20 @@ impl Hardware {
     pub fn decode(
         &mut self,
         instr: u16,
-        bus: &mut EventLoopProxy<AppEvents>,
+        bus: &EventLoopProxy<AppEvents>,
         pixel_buffer: &Arc<RwLock<Pixels>>,
         input: &Arc<RwLock<InputState>>,
     ) {
-        let b0 = (instr & 0xFF00) >> 8 as u8; // To get first byte, & the 8 leftmost bits which removes the 8 rightmost, then shift by 8 to the right to make the u8 conversion contain the bits originally on the left.
-                                              // println!("instr: {instr:x}, pc: {pc:x}", pc = self.pc);
+        let b0 = (instr & 0xFF00) >> 8u8; // To get first byte, & the 8 leftmost bits which removes the 8 rightmost, then shift by 8 to the right to make the u8 conversion contain the bits originally on the left.
+                                          // println!("instr: {instr:x}, pc: {pc:x}", pc = self.pc);
         let b1 = (instr & 0x00FF) as u8; // To get the second byte, just & the 8 rightmost bits, which removes the leftmost bits. The remaining bits are already at the rightmost position so no need to shift before converting to u8.
 
-        let op = (b0 & 0xF0) >> 4 as u8; // first nibble, the instruction. Keep 4 leftmost bits, then shift them to the right-hand side.
+        let op = (b0 & 0xF0) >> 4u8; // first nibble, the instruction. Keep 4 leftmost bits, then shift them to the right-hand side.
         let x = (b0 & 0x0F) as usize; // second nibble, register lookup! Only keep rightmost bits.
         let y = ((b1 & 0xF0) >> 4) as usize; // third nibble, register lookup! Keep leftmost bits, shift 4 to left.
         let n = b1 & 0x0F; // fourth nibble, 4 bit number
         let nn = b1; // NN = second byte
-        let nnn = (instr & 0x0FFF) as u16; // NNN = second, third and fourth nibbles, obtained by ANDing by b00001111 11111111 masking away the first nibble.
+        let nnn = instr & 0x0FFF; // NNN = second, third and fourth nibbles, obtained by ANDing by b00001111 11111111 masking away the first nibble.
         match (op, x, y, n) {
             // Clear screen
             (0x0, 0x0, 0xe, 0x0) => bus.send_event(AppEvents::ClearScreen).unwrap(),
@@ -150,13 +148,13 @@ impl Hardware {
                 self.registers[x] = self.registers[y];
             }
             (0x8, _, _, 1) => {
-                self.registers[x] = self.registers[x] | self.registers[y];
+                self.registers[x] |= self.registers[y];
             }
             (0x8, _, _, 2) => {
-                self.registers[x] = self.registers[x] & self.registers[y];
+                self.registers[x] &= self.registers[y];
             }
             (0x8, _, _, 3) => {
-                self.registers[x] = self.registers[x] ^ self.registers[y];
+                self.registers[x] ^= self.registers[y];
             }
             (0x8, _, _, 4) => {
                 let overflow = self.registers[x].checked_add(self.registers[y]).is_none();
@@ -170,13 +168,13 @@ impl Hardware {
             }
             (0x8, _, _, 6) => {
                 match self.generation {
-                    Generation::COSMAC => {
+                    Generation::Cosmac => {
                         self.registers[x] = self.registers[y];
                     }
                     Generation::Super => {}
                 }
                 let flag = self.registers[x] & 1 == 1;
-                self.registers[x] = self.registers[x] >> 1;
+                self.registers[x] >>= 1;
                 self.set_flag(flag);
             }
             (0x8, _, _, 7) => {
@@ -185,11 +183,11 @@ impl Hardware {
                 self.set_flag(flag);
             }
             (0x8, _, _, 0xe) => {
-                if matches!(self.generation, Generation::COSMAC) {
+                if matches!(self.generation, Generation::Cosmac) {
                     self.registers[x] = self.registers[y];
                 }
                 let flag = (self.registers[x] >> 7) == 1;
-                self.registers[x] = self.registers[x] << 1;
+                self.registers[x] <<= 1;
                 self.set_flag(flag);
             }
 
@@ -203,7 +201,7 @@ impl Hardware {
                 self.i = nnn;
             }
             (0xb, _, _, _) => match self.generation {
-                Generation::COSMAC => self.pc = self.registers[0] as u16 + nnn,
+                Generation::Cosmac => self.pc = self.registers[0] as u16 + nnn,
                 Generation::Super => {
                     self.pc = self.registers[x] as u16 + nnn;
                 }
@@ -313,7 +311,7 @@ impl Hardware {
                 for i in 0..=x {
                     self.memory[self.i as usize + i] = self.registers[i];
                 }
-                if matches!(self.generation, Generation::COSMAC) {
+                if matches!(self.generation, Generation::Cosmac) {
                     self.i = self.i.wrapping_add(x as u16 + 1)
                 }
             }
@@ -321,7 +319,7 @@ impl Hardware {
                 for i in 0..=x {
                     self.registers[i] = self.memory[self.i as usize + i];
                 }
-                if matches!(self.generation, Generation::COSMAC) {
+                if matches!(self.generation, Generation::Cosmac) {
                     self.i = self.i.wrapping_add(x as u16 + 1)
                 }
             }
@@ -336,8 +334,6 @@ impl Hardware {
         self.delay_timer = self.delay_timer.saturating_sub(1);
         self.sound_timer = self.sound_timer.saturating_sub(1);
     }
-}
-impl Hardware {
     fn pc(&self) -> usize {
         self.pc as usize
     }

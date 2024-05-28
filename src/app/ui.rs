@@ -223,8 +223,8 @@ impl Gui {
                         );
                         ui.selectable_value(
                             &mut self.generation,
-                            Generation::COSMAC,
-                            format!("{:?}", Generation::COSMAC),
+                            Generation::Cosmac,
+                            format!("{:?}", Generation::Cosmac),
                         );
                     });
                 ComboBox::from_label("Emulator kind")
@@ -265,7 +265,7 @@ impl Gui {
                         if ui.link(format!("{ip:?}")).clicked() {
                             if let HostIp::Ip(ip) = ip {
                                 ui.output_mut(|a| {
-                                    a.copied_text = ip.clone();
+                                    a.copied_text.clone_from(ip);
                                     println!("ip: {:?}", a.copied_text);
                                 });
                             }
@@ -377,7 +377,7 @@ impl Debugger {
             let label = |v, name| format!("{name}: [{v}] ({v:x})");
             ScrollArea::vertical().max_height(800.).show(ui, |ui| {
                 for i in (0..self.op_hist.len()).rev() {
-                    ui.label(label(self.op_hist[i] as u16, i.to_string()));
+                    ui.label(label(self.op_hist[i], i.to_string()));
                 }
             });
         });

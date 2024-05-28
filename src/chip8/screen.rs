@@ -7,7 +7,7 @@ pub fn pixel_row(pixels: &Pixels, y: usize) -> &[u8] {
     let frame = pixels.frame();
     let pixel_size = 4;
     let width = SCREEN_WIDTH * pixel_size;
-    &frame.get(y * width..(y + 1) * width).unwrap_or_default()
+    frame.get(y * width..(y + 1) * width).unwrap_or_default()
 }
 pub fn pixel_row_mut(pixels: &mut Pixels, y: usize) -> &mut [u8] {
     let frame = pixels.frame_mut();

@@ -76,8 +76,7 @@ impl Chip8 {
         let program = emulator_config
             .path
             .as_ref()
-            .map(|path| fs::read(path).ok())
-            .flatten()
+            .and_then(|path| fs::read(path).ok())
             .unwrap_or(DEFAULT_PROGRAM.to_vec());
         hardware.load_program(&program);
         Chip8 {
@@ -92,7 +91,7 @@ impl Chip8 {
     pub fn run_hardware_cycle(&mut self) {
         let instr = self.hardware.fetch();
         self.hardware
-            .decode(instr, &mut self.display_bus, &self.pixels, &self.input);
+            .decode(instr, &self.display_bus, &self.pixels, &self.input);
     }
     pub fn handle_event(&mut self) -> Quit {
         if let Ok(event) = self.event_bus.try_recv() {
@@ -133,7 +132,7 @@ impl Chip8 {
         let debug_state = DebugState {
             pc: self.hardware.pc,
             i: self.hardware.i,
-            reg: self.hardware.registers.clone(),
+            reg: self.hardware.registers,
             op: instr,
         };
         self.display_bus
@@ -197,27 +196,28 @@ impl Chip8Runner {
         self.kind.can_run()
     }
 }
+#[derive(Copy, Clone)]
 pub enum Chip8RunnerKind {
     DebugRunner { cycles_to_run: usize },
     NormalRunner,
 }
 impl Chip8RunnerKind {
-    pub fn new(debug: bool) -> Chip8RunnerKind {
+    pub const fn new(debug: bool) -> Chip8RunnerKind {
         if debug {
-            Chip8RunnerKind::DebugRunner { cycles_to_run: 0 }
+            Self::DebugRunner { cycles_to_run: 0 }
         } else {
-            Chip8RunnerKind::NormalRunner
+            Self::NormalRunner
         }
     }
     pub fn advance(&mut self) {
-        if let Chip8RunnerKind::DebugRunner { cycles_to_run } = self {
+        if let Self::DebugRunner { cycles_to_run } = self {
             *cycles_to_run -= 1;
         }
     }
-    pub fn can_run(&self) -> bool {
+    pub const fn can_run(self) -> bool {
         match self {
-            Chip8RunnerKind::DebugRunner { cycles_to_run } => *cycles_to_run > 0,
-            Chip8RunnerKind::NormalRunner => true,
+            Self::DebugRunner { cycles_to_run } => cycles_to_run > 0,
+            Self::NormalRunner => true,
         }
     }
 }

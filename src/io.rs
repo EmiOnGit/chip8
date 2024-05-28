@@ -29,16 +29,16 @@ pub const KEY_MAP: [VirtualKeyCode; 16] = [
     VirtualKeyCode::V,
 ];
 impl InputState {
-    pub fn pressed(&self) -> u16 {
+    pub const fn pressed(self) -> u16 {
         self.keys | self.client
     }
     pub fn update(&mut self, input: &WinitInputHelper) {
         for (i, key) in KEY_MAP.into_iter().enumerate() {
             if input.key_pressed(key) {
-                self.keys = self.keys | (1 << i);
+                self.keys |= 1 << i;
             }
             if input.key_released(key) {
-                self.keys = self.keys & !(1 << i);
+                self.keys &= !(1 << i);
             }
         }
     }

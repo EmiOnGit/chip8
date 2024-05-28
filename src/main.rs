@@ -1,3 +1,4 @@
+#![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 use app::App;
 use pixels::Error;
 mod app;

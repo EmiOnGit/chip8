@@ -38,16 +38,18 @@ impl EmulatorView {
             EmulatorViewMode::Host(host) => {
                 host.sender.send(event)?;
             }
-            EmulatorViewMode::Client(_) => match event {
-                EmulatorEvents::ChangeColor(new_color) => self.on_pixels_mut(|pixels| {
+            EmulatorViewMode::Client(_) => {
+                let EmulatorEvents::ChangeColor(new_color) = event else {
+                    return Ok(());
+                };
+                self.on_pixels_mut(|pixels| {
                     pixels
                         .frame_mut()
                         .chunks_mut(4)
                         .filter(|c| *c != [0, 0, 0, 0])
                         .for_each(|c| c.clone_from_slice(&new_color.to_array()))
-                }),
-                _ => {}
-            },
+                })
+            }
             EmulatorViewMode::OffView(_) => {}
             EmulatorViewMode::Single(single) => {
                 single.sender.send(event)?;
@@ -89,7 +91,7 @@ impl EmulatorView {
             pixels,
             mode: EmulatorViewMode::Single(SingleView { sender }),
         };
-        return (view, recv);
+        (view, recv)
     }
     pub fn host(
         pixels: PixelRef,
@@ -112,7 +114,7 @@ impl EmulatorView {
             }),
             pixels,
         };
-        return Ok((view, recv, connection2));
+        Ok((view, recv, connection2))
     }
     pub fn on_pixels<T>(&self, f: impl FnOnce(&Pixels) -> T) -> Option<T> {
         self.pixels.read().ok().map(|p| f(&p))

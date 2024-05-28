@@ -1,14 +1,14 @@
 pub fn map_op(instr: u16) -> String {
-    let b0 = (instr & 0xFF00) >> 8 as u8; // To get first byte, & the 8 leftmost bits which removes the 8 rightmost, then shift by 8 to the right to make the u8 conversion contain the bits originally on the left.
-                                          // println!("instr: {instr:x}, pc: {pc:x}", pc = self.pc);
+    let b0 = (instr & 0xFF00) >> 8u8; // To get first byte, & the 8 leftmost bits which removes the 8 rightmost, then shift by 8 to the right to make the u8 conversion contain the bits originally on the left.
+                                      // println!("instr: {instr:x}, pc: {pc:x}", pc = self.pc);
     let b1 = (instr & 0x00FF) as u8; // To get the second byte, just & the 8 rightmost bits, which removes the leftmost bits. The remaining bits are already at the rightmost position so no need to shift before converting to u8.
 
-    let op = (b0 & 0xF0) >> 4 as u8; // first nibble, the instruction. Keep 4 leftmost bits, then shift them to the right-hand side.
+    let op = (b0 & 0xF0) >> 4u8; // first nibble, the instruction. Keep 4 leftmost bits, then shift them to the right-hand side.
     let x = (b0 & 0x0F) as usize; // second nibble, register lookup! Only keep rightmost bits.
     let y = ((b1 & 0xF0) >> 4) as usize; // third nibble, register lookup! Keep leftmost bits, shift 4 to left.
     let n = b1 & 0x0F; // fourth nibble, 4 bit number
     let nn = b1; // NN = second byte
-    let nnn = (instr & 0x0FFF) as u16; // NNN = second, third and fourth nibbles, obtained by ANDing by b00001111 11111111 masking away the first nibble.
+    let nnn = instr & 0x0FFF; // NNN = second, third and fourth nibbles, obtained by ANDing by b00001111 11111111 masking away the first nibble.
     match (op, x, y, n) {
         (0x0, 0x0, 0xe, 0x0) => "clear".into(),
 

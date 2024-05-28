@@ -55,15 +55,13 @@ impl App {
         let framework = {
             let window_size = window.inner_size();
             let scale_factor = window.scale_factor() as f32;
-            let framework = Framework::new(
+            Framework::new(
                 &event_loop,
                 window_size.width,
                 window_size.height,
                 scale_factor,
                 &emulator_view,
-            );
-
-            framework
+            )
         };
         let input_state = Arc::new(RwLock::new(InputState::default()));
         Ok(App {
@@ -114,7 +112,6 @@ impl App {
                         if let Err(err) = pixels.resize_surface(size.width, size.height) {
                             eprintln!("pixels.resize_surface {err}");
                             *control_flow = ControlFlow::Exit;
-                            return;
                         }
                     });
                     framework.resize(size.width, size.height);
@@ -166,12 +163,12 @@ impl App {
                         AppEvents::DrawSprite { sprite, x, y } => {
                             emulator_view.on_pixels_mut(|pixels| {
                                 let color = framework.gui.color.to_array();
-                                for y_delta in 0..16 {
+                                for (y_delta, sprite_row) in sprite.into_iter().enumerate() {
                                     screen::set_row(
                                         pixels,
                                         x as usize,
                                         y as usize + y_delta,
-                                        sprite[y_delta],
+                                        sprite_row,
                                         color,
                                     );
                                 }
@@ -332,7 +329,7 @@ fn spawn_emulator(
             });
         }
     }
-    return Ok(());
+    Ok(())
 }
 pub fn fetch_global_ip() -> Option<String> {
     let resp = minreq::get("https://api6.ipify.org").send();
