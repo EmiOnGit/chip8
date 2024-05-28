@@ -2,7 +2,7 @@ use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     sync::{
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver, SendError, Sender},
         Arc, RwLock,
     },
     thread,
@@ -16,6 +16,8 @@ use crate::{
     chip8::{screen, EmulatorEvents},
     display_bus::AppEvents,
 };
+
+use super::EmulatorSpawnError;
 
 pub enum EmulatorViewMode {
     Host(HostView),
@@ -31,9 +33,11 @@ pub struct EmulatorView {
     pub mode: EmulatorViewMode,
 }
 impl EmulatorView {
-    pub fn send(&mut self, event: EmulatorEvents) {
+    pub fn send(&mut self, event: EmulatorEvents) -> Result<(), SendError<EmulatorEvents>> {
         match &self.mode {
-            EmulatorViewMode::Host(host) => host.sender.send(event).unwrap(),
+            EmulatorViewMode::Host(host) => {
+                host.sender.send(event)?;
+            }
             EmulatorViewMode::Client(_) => match event {
                 EmulatorEvents::ChangeColor(new_color) => self.on_pixels_mut(|pixels| {
                     pixels
@@ -45,8 +49,11 @@ impl EmulatorView {
                 _ => {}
             },
             EmulatorViewMode::OffView(_) => {}
-            EmulatorViewMode::Single(single) => single.sender.send(event).unwrap(),
+            EmulatorViewMode::Single(single) => {
+                single.sender.send(event)?;
+            }
         }
+        Ok(())
     }
     pub fn new(window: &Window) -> Result<Self, pixels::Error> {
         let window_size = window.inner_size();
@@ -61,17 +68,20 @@ impl EmulatorView {
             mode: EmulatorViewMode::OffView(OffView {}),
         })
     }
-    pub fn client(pixels: PixelRef, host_addr: SocketAddr) -> (Self, TcpStream) {
-        let connection = TcpStream::connect(host_addr).unwrap();
+    pub fn client(
+        pixels: PixelRef,
+        host_addr: SocketAddr,
+    ) -> Result<(Self, TcpStream), EmulatorSpawnError> {
+        let connection = TcpStream::connect(host_addr)?;
         println!("CLIENT connected with {connection:?}");
         let view = EmulatorView {
             pixels,
             mode: EmulatorViewMode::Client(ClientView {
-                tcp: connection.try_clone().unwrap(),
+                tcp: connection.try_clone()?,
             }),
         };
         thread::sleep(Duration::from_secs_f32(0.05));
-        (view, connection)
+        Ok((view, connection))
     }
     pub fn single(pixels: PixelRef) -> (Self, Receiver<EmulatorEvents>) {
         let (sender, recv) = mpsc::channel();
@@ -81,17 +91,20 @@ impl EmulatorView {
         };
         return (view, recv);
     }
-    pub fn host(pixels: PixelRef, addr: SocketAddr) -> (Self, Receiver<EmulatorEvents>, TcpStream) {
+    pub fn host(
+        pixels: PixelRef,
+        addr: SocketAddr,
+    ) -> Result<(Self, Receiver<EmulatorEvents>, TcpStream), EmulatorSpawnError> {
         let connection = {
-            let listener = TcpListener::bind(addr).unwrap();
+            let listener = TcpListener::bind(addr)?;
             println!("start searching");
-            let (connection, addr) = listener.accept().unwrap();
+            let (connection, addr) = listener.accept()?;
             println!("connection was successful with: {}", addr);
             thread::sleep(Duration::from_secs_f32(0.05));
             connection
         };
         let (sender, recv) = mpsc::channel();
-        let connection2 = connection.try_clone().unwrap();
+        let connection2 = connection.try_clone()?;
         let view = EmulatorView {
             mode: EmulatorViewMode::Host(HostView {
                 sender,
@@ -99,7 +112,7 @@ impl EmulatorView {
             }),
             pixels,
         };
-        return (view, recv, connection2);
+        return Ok((view, recv, connection2));
     }
     pub fn on_pixels<T>(&self, f: impl FnOnce(&Pixels) -> T) -> Option<T> {
         self.pixels.read().ok().map(|p| f(&p))

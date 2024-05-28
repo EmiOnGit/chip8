@@ -2,6 +2,7 @@ mod debug_map;
 pub mod emulator_view;
 mod ui;
 
+use std::error::Error;
 use std::fmt::Display;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
@@ -13,7 +14,7 @@ use crate::chip8::screen::{self};
 use crate::chip8::{Chip8, EmulatorConfig, EmulatorEvents};
 use crate::display_bus::{AppEvents, ClientMessage};
 use crate::io::InputState;
-use pixels::Error;
+use pixels::Error as PixError;
 use serde::{Deserialize, Serialize};
 use winit::dpi::LogicalSize;
 use winit::event::{Event, VirtualKeyCode};
@@ -37,7 +38,7 @@ impl App {
     pub fn _display_bus(&self) -> EventLoopProxy<AppEvents> {
         self.event_loop.create_proxy()
     }
-    pub fn init() -> Result<App, Error> {
+    pub fn init() -> Result<App, PixError> {
         let input = WinitInputHelper::new();
         let event_loop = EventLoopBuilder::<AppEvents>::default().build();
 
@@ -74,7 +75,7 @@ impl App {
             input_state,
         })
     }
-    pub fn run(self) -> Result<(), Error> {
+    pub fn run(self) -> Result<(), PixError> {
         let App {
             mut input,
             event_loop,
@@ -175,7 +176,10 @@ impl App {
                                     );
                                 }
                             });
-                            emulator_view.send(EmulatorEvents::DisplaySynced);
+                            let result = emulator_view.send(EmulatorEvents::DisplaySynced);
+                            if let Err(e) = result {
+                                eprintln!("couldn't send event to emulator with {e}");
+                            }
                         }
                         AppEvents::SpawnEmulator {
                             kind,
@@ -192,16 +196,22 @@ impl App {
                                 fps,
                             );
                             let event_bus = framework.gui.event_bus.clone();
-                            spawn_emulator(
+                            let result = spawn_emulator(
                                 &mut emulator_view,
                                 config,
                                 Arc::clone(&input_state),
                                 event_bus,
                                 kind,
                             );
+                            if let Err(e) = result {
+                                eprintln!("failed to spawn emulator with {e}");
+                            }
                         }
                         AppEvents::EmulatorEvent(event) => {
-                            emulator_view.send(event);
+                            let result = emulator_view.send(event);
+                            if let Err(e) = result {
+                                eprintln!("couldn't send event to emulator with {e}");
+                            }
                         }
                         AppEvents::DebugEmulatorState(state) => {
                             framework.gui.update_debugger(state);
@@ -247,17 +257,22 @@ impl Display for EmulatorKind {
         }
     }
 }
+
 fn spawn_emulator(
     emulator_view: &mut EmulatorView,
     config: EmulatorConfig,
     input_state: InputStateRef,
     event_bus: EventLoopProxy<AppEvents>,
     kind: EmulatorKind,
-) {
+) -> Result<(), EmulatorSpawnError> {
     let pixels = emulator_view.clone_pixel_buffer();
     // we close all emulators that may already be running
-    emulator_view.send(EmulatorEvents::QuitEmulator);
-    event_bus.send_event(AppEvents::ClearScreen).unwrap();
+    if emulator_view.send(EmulatorEvents::QuitEmulator).is_ok() {
+        println!("closing other emulators");
+    }
+    event_bus
+        .send_event(AppEvents::ClearScreen)
+        .expect("couldn't send event to app");
     match kind {
         EmulatorKind::Single => {
             let (view, recv) = EmulatorView::single(Arc::clone(&pixels));
@@ -270,21 +285,18 @@ fn spawn_emulator(
         EmulatorKind::Server { ip } => {
             let ip = match ip {
                 HostIp::Empty => {
-                    println!("couldn't start server. No host ip");
-                    return;
+                    return Err(EmulatorSpawnError::NoServerIp);
                 }
                 HostIp::NotFound => {
-                    println!("couldn't start server. Host ip could no be found");
-                    return;
+                    return Err(EmulatorSpawnError::NoServerIp);
                 }
                 HostIp::Ip(ip) => ip,
             };
             let Ok(ip) = IpAddr::from_str(&ip) else {
-                println!("couldn't convert {} to ip addr", ip);
-                return;
+                return Err(EmulatorSpawnError::IpConvertionError(ip));
             };
             let socket_addr = SocketAddr::new(ip, PORT);
-            let (view, recv, mut tcp) = EmulatorView::host(Arc::clone(&pixels), socket_addr);
+            let (view, recv, mut tcp) = EmulatorView::host(Arc::clone(&pixels), socket_addr)?;
             *emulator_view = view;
             let event_bus2 = event_bus.clone();
             thread::spawn(move || {
@@ -292,7 +304,9 @@ fn spawn_emulator(
                     if let Some(message) = receive_event_over_tcp(&mut tcp) {
                         // only send messages to the app that are from a client
                         if matches!(message, AppEvents::ClientMessage(_)) {
-                            event_bus2.send_event(message).unwrap();
+                            event_bus2
+                                .send_event(message)
+                                .expect("couldn't send event to app");
                         }
                     }
                 }
@@ -304,19 +318,21 @@ fn spawn_emulator(
         }
         EmulatorKind::Client { host_ip } => {
             let Ok(ip) = IpAddr::from_str(&host_ip) else {
-                println!("couldn't convert {} to ip addr", host_ip);
-                return;
+                return Err(EmulatorSpawnError::IpConvertionError(host_ip));
             };
             let socket_addr = SocketAddr::new(ip, PORT);
-            let (client, mut tcp) = EmulatorView::client(pixels, socket_addr);
+            let (client, mut tcp) = EmulatorView::client(pixels, socket_addr)?;
             *emulator_view = client;
             thread::spawn(move || loop {
                 if let Some(message) = receive_event_over_tcp(&mut tcp) {
-                    event_bus.send_event(message).unwrap();
+                    event_bus
+                        .send_event(message)
+                        .expect("couldn't send event to app");
                 }
             });
         }
     }
+    return Ok(());
 }
 pub fn fetch_global_ip() -> Option<String> {
     let resp = minreq::get("https://api6.ipify.org").send();
@@ -327,4 +343,29 @@ pub fn fetch_global_ip() -> Option<String> {
     let ip = resp.as_str().ok()?.to_string();
     println!("Successfully fetched ip addr from ipify");
     Some(ip)
+}
+#[derive(Debug)]
+pub enum EmulatorSpawnError {
+    NoServerIp,
+    IpConvertionError(String),
+    IoError(std::io::Error),
+}
+impl Display for EmulatorSpawnError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EmulatorSpawnError::NoServerIp => {
+                write!(f, "The server can not spawn without a valid server ip")
+            }
+            EmulatorSpawnError::IpConvertionError(ip) => {
+                write!(f, "The ip {ip} couldn't be converted to a valid ip addr.")
+            }
+            EmulatorSpawnError::IoError(e) => e.fmt(f),
+        }
+    }
+}
+impl Error for EmulatorSpawnError {}
+impl From<std::io::Error> for EmulatorSpawnError {
+    fn from(value: std::io::Error) -> Self {
+        EmulatorSpawnError::IoError(value)
+    }
 }
