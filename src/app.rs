@@ -267,8 +267,8 @@ fn spawn_emulator(
 ) -> Result<(), EmulatorSpawnError> {
     let pixels = emulator_view.clone_pixel_buffer();
     // we close all emulators that may already be running
-    if emulator_view.send(EmulatorEvents::QuitEmulator).is_ok() {
-        println!("closing other emulators");
+    if let Err(e) = emulator_view.send(EmulatorEvents::QuitEmulator) {
+        println!("couldn't close other emulators with {e}");
     }
     event_bus
         .send_event(AppEvents::ClearScreen)
