@@ -20,6 +20,7 @@ use self::hardware::{Generation, Hardware};
 pub mod hardware;
 pub mod screen;
 
+pub const DEFAULT_PROGRAM: &[u8] = include_bytes!("../assets/hello_viki.ch");
 pub struct Chip8 {
     display_bus: EventLoopProxy<AppEvents>,
     pixels: Arc<RwLock<Pixels>>,
@@ -77,7 +78,7 @@ impl Chip8 {
             .as_ref()
             .map(|path| fs::read(path).ok())
             .flatten()
-            .unwrap_or(include_bytes!("../assets/tetris.ch8").to_vec());
+            .unwrap_or(DEFAULT_PROGRAM.to_vec());
         hardware.load_program(&program);
         Chip8 {
             event_bus,

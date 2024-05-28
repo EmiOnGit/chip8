@@ -1,3 +1,4 @@
+mod debug_map;
 pub mod emulator_view;
 mod ui;
 
@@ -154,7 +155,7 @@ impl App {
                         send_over_tcp(&mut host_view.tcp, &app_event);
                     }
                     match app_event {
-                        AppEvents::Nop => println!("nop"),
+                        AppEvents::Nop => println!("received a nop? :o"),
                         AppEvents::ClearScreen => {
                             emulator_view.on_pixels_mut(|pixels| {
                                 pixels.frame_mut().fill(0);

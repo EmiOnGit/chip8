@@ -10,6 +10,7 @@ use crate::chip8::hardware::Generation;
 use crate::chip8::EmulatorEvents;
 use crate::display_bus::{AppEvents, DebugState};
 
+use super::debug_map::map_op;
 use super::emulator_view::EmulatorView;
 use super::{fetch_global_ip, EmulatorKind, HostIp};
 
@@ -358,7 +359,12 @@ impl Debugger {
             }
             let label = |v, name| format!("{name}: [{v}] ({v:x})");
             ui.label(label(state.pc, "pc"));
-            ui.label(label(state.op, "op"));
+            ui.label(format!(
+                "{name}: [{op}] ({op:x}) {desc}",
+                name = "op",
+                op = state.op,
+                desc = map_op(state.op)
+            ));
             ui.label(label(state.i, "i"));
             ui.separator();
             let label = |v, name| format!("{name}: [{v}] ({v:x})");

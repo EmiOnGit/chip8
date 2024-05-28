@@ -294,6 +294,8 @@ impl Hardware {
                     } else {
                         self.pc -= 2;
                     }
+                } else {
+                    self.pc -= 2;
                 }
             }
             (0xf, _, 2, 9) => {
@@ -325,7 +327,7 @@ impl Hardware {
             }
 
             _ => {
-                panic!()
+                panic!("unknown op code: {instr:x}");
             }
         }
     }
